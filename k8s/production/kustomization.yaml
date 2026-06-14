@@ -1,0 +1,6 @@
+namespace: overmindv-production
+resources:
+  - namespace.yaml
+  - ../base
+patches:
+  - path: patch-env.yaml
