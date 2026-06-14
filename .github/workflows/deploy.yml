@@ -1,0 +1,58 @@
+name: Ratchet Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v5
+        with:
+          version: v1.34.8
+      - name: Write kubeconfig
+        env:
+          KUBECONFIG_DEVELOPMENT: ${{ secrets.KUBECONFIG_DEVELOPMENT }}
+          KUBECONFIG_STAGING: ${{ secrets.KUBECONFIG_STAGING }}
+          KUBECONFIG_PRODUCTION: ${{ secrets.KUBECONFIG_PRODUCTION }}
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          case "$TARGET_ENV" in
+            development)
+              printf '%s' "$KUBECONFIG_DEVELOPMENT" > "$RUNNER_TEMP/kubeconfig"
+              ;;
+            staging)
+              printf '%s' "$KUBECONFIG_STAGING" > "$RUNNER_TEMP/kubeconfig"
+              ;;
+            production)
+              printf '%s' "$KUBECONFIG_PRODUCTION" > "$RUNNER_TEMP/kubeconfig"
+              ;;
+            *)
+              echo "Unsupported environment: $TARGET_ENV" >&2
+              exit 1
+              ;;
+          esac
+      - name: Deploy overlay
+        env:
+          KUBECONFIG: ${{ runner.temp }}/kubeconfig
+          TARGET_ENV: ${{ inputs.environment }}
+        run: |
+          case "$TARGET_ENV" in
+            development) kubectl apply -k k8s/dev ;;
+            staging) kubectl apply -k k8s/staging ;;
+            production) kubectl apply -k k8s/production ;;
+          esac

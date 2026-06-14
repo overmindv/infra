@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcee
+spec:
+  template:
+    spec:
+      containers:
+        - name: arcee
+          env:
+            - name: ARCEE_ENV
+              value: development
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laserbeak
+spec:
+  template:
+    spec:
+      containers:
+        - name: laserbeak
+          env:
+            - name: LASERBEAK_ENV
+              value: development

@@ -1,0 +1,32 @@
+name: Ratchet CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compose-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Docker Compose
+        run: docker compose -f docker-compose/local.yaml config >/dev/null
+
+  kustomize-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-kubectl@v5
+        with:
+          version: v1.34.8
+      - name: Validate dev overlay
+        run: kubectl kustomize k8s/dev >/dev/null
+      - name: Validate staging overlay
+        run: kubectl kustomize k8s/staging >/dev/null
+      - name: Validate production overlay
+        run: kubectl kustomize k8s/production >/dev/null

@@ -1,0 +1,6 @@
+namespace: overmindv-staging
+resources:
+  - namespace.yaml
+  - ../base
+patches:
+  - path: patch-env.yaml
