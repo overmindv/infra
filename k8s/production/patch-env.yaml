@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcee
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: arcee
+          env:
+            - name: ARCEE_ENV
+              value: production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laserbeak
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: laserbeak
+          env:
+            - name: LASERBEAK_ENV
+              value: production
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soundwave
+spec:
+  replicas: 2
