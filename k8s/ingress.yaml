@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: laserbeak
+  namespace: overmindv
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: overmindv.local
+      http:
+        paths:
+          - path: /graphql
+            pathType: Exact
+            backend:
+              service:
+                name: laserbeak
+                port:
+                  number: 8081
+          - path: /playground
+            pathType: Prefix
+            backend:
+              service:
+                name: laserbeak
+                port:
+                  number: 8081
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: laserbeak
+                port:
+                  number: 8081
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: soundwave
+                port:
+                  number: 3000

@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: soundwave
+  namespace: overmindv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: soundwave
+  template:
+    metadata:
+      labels:
+        app: soundwave
+    spec:
+      containers:
+        - name: soundwave
+          image: overmindv/soundwave:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          readinessProbe:
+            httpGet: { path: /, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          volumeMounts:
+            - name: nginx-tmp
+              mountPath: /tmp
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { cpu: 250m, memory: 128Mi }
+      volumes:
+        - name: nginx-tmp
+          emptyDir: {}

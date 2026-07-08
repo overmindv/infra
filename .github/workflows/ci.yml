@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate Docker Compose
-        run: docker compose -f docker-compose/local.yaml config >/dev/null
+        run: cp .env.example .env && docker compose -f docker-compose.yml config >/dev/null
 
   kustomize-validate:
     runs-on: ubuntu-latest
@@ -24,9 +24,5 @@ jobs:
       - uses: azure/setup-kubectl@v5
         with:
           version: v1.34.8
-      - name: Validate dev overlay
-        run: kubectl kustomize k8s/dev >/dev/null
-      - name: Validate staging overlay
-        run: kubectl kustomize k8s/staging >/dev/null
-      - name: Validate production overlay
-        run: kubectl kustomize k8s/production >/dev/null
+      - name: Validate Kubernetes baseline
+        run: kubectl kustomize k8s >/dev/null

@@ -1,0 +1,110 @@
+name: overmindv
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-arcee}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - arcee-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  arcee-migrate:
+    build: ../arcee
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-arcee}?sslmode=disable"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  arcee:
+    build: ../arcee
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-arcee}?sslmode=disable"
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-arcee}
+      JWT_TTL: ${JWT_TTL:-24h}
+    depends_on:
+      arcee-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  laserbeak:
+    build: ../laserbeak
+    environment:
+      PORT: "8081"
+      ARCEE_GRAPHQL_URL: http://arcee:8080/query
+      ARCEE_HEALTH_URL: http://arcee:8080/health
+      ARCEE_TIMEOUT: ${ARCEE_TIMEOUT:-5s}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-arcee}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    depends_on:
+      arcee:
+        condition: service_healthy
+    ports:
+      - "${LASERBEAK_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  soundwave:
+    build:
+      context: ../soundwave
+      args:
+        VITE_API_URL: /graphql
+    depends_on:
+      laserbeak:
+        condition: service_healthy
+    ports:
+      - "${SOUNDWAVE_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  bumblebee:
+    image: alpine:3.22
+    profiles: ["future"]
+    command: ["sleep", "infinity"]
+    healthcheck: { test: ["CMD", "true"] }
+
+  optimus-prime:
+    image: alpine:3.22
+    profiles: ["future"]
+    command: ["sleep", "infinity"]
+    healthcheck: { test: ["CMD", "true"] }
+
+  mirage:
+    image: alpine:3.22
+    profiles: ["future"]
+    command: ["sleep", "infinity"]
+    healthcheck: { test: ["CMD", "true"] }
+
+volumes:
+  arcee-postgres:

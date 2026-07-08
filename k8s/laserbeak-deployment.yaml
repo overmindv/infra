@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: laserbeak
+  namespace: overmindv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: laserbeak
+  template:
+    metadata:
+      labels:
+        app: laserbeak
+    spec:
+      containers:
+        - name: laserbeak
+          image: overmindv/laserbeak:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: PORT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: LASERBEAK_PORT } }
+            - name: ARCEE_GRAPHQL_URL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_GRAPHQL_URL } }
+            - name: ARCEE_HEALTH_URL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_HEALTH_URL } }
+            - name: ARCEE_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_TIMEOUT } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: JWT_SECRET } }
+            - name: JWT_ISSUER
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_ISSUER } }
+            - name: CORS_ORIGINS
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: CORS_ORIGINS } }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
