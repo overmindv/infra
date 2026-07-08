@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: overmindv-config
+  namespace: overmindv
+data:
+  ARCEE_PORT: "8080"
+  LASERBEAK_PORT: "8081"
+  ARCEE_GRAPHQL_URL: "http://arcee:8080/query"
+  ARCEE_HEALTH_URL: "http://arcee:8080/health"
+  ARCEE_TIMEOUT: "5s"
+  JWT_ISSUER: "arcee"
+  JWT_TTL: "24h"
+  CORS_ORIGINS: "http://overmindv.local"

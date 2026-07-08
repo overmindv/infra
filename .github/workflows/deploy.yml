@@ -3,14 +3,10 @@ name: Ratchet Deploy
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: Deployment environment
+      image_tag:
+        description: Existing image tag to deploy
         required: true
-        type: choice
-        options:
-          - development
-          - staging
-          - production
+        default: latest
 
 permissions:
   contents: read
@@ -18,7 +14,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: production
     steps:
       - uses: actions/checkout@v4
       - uses: azure/setup-kubectl@v5
@@ -26,33 +22,28 @@ jobs:
           version: v1.34.8
       - name: Write kubeconfig
         env:
-          KUBECONFIG_DEVELOPMENT: ${{ secrets.KUBECONFIG_DEVELOPMENT }}
-          KUBECONFIG_STAGING: ${{ secrets.KUBECONFIG_STAGING }}
-          KUBECONFIG_PRODUCTION: ${{ secrets.KUBECONFIG_PRODUCTION }}
-          TARGET_ENV: ${{ inputs.environment }}
-        run: |
-          case "$TARGET_ENV" in
-            development)
-              printf '%s' "$KUBECONFIG_DEVELOPMENT" > "$RUNNER_TEMP/kubeconfig"
-              ;;
-            staging)
-              printf '%s' "$KUBECONFIG_STAGING" > "$RUNNER_TEMP/kubeconfig"
-              ;;
-            production)
-              printf '%s' "$KUBECONFIG_PRODUCTION" > "$RUNNER_TEMP/kubeconfig"
-              ;;
-            *)
-              echo "Unsupported environment: $TARGET_ENV" >&2
-              exit 1
-              ;;
-          esac
-      - name: Deploy overlay
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG_PRODUCTION }}
+        run: printf '%s' "$KUBECONFIG_CONTENT" > "$RUNNER_TEMP/kubeconfig"
+      - name: Create runtime secret and deploy
         env:
           KUBECONFIG: ${{ runner.temp }}/kubeconfig
-          TARGET_ENV: ${{ inputs.environment }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          IMAGE_REGISTRY: ghcr.io/overmindv
         run: |
-          case "$TARGET_ENV" in
-            development) kubectl apply -k k8s/dev ;;
-            staging) kubectl apply -k k8s/staging ;;
-            production) kubectl apply -k k8s/production ;;
-          esac
+          kubectl apply -f k8s/namespace.yaml
+          kubectl -n overmindv create secret generic overmindv-secrets \
+            --from-literal=POSTGRES_DB=arcee \
+            --from-literal=POSTGRES_USER=postgres \
+            --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --from-literal=DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/arcee?sslmode=disable" \
+            --from-literal=JWT_SECRET="$JWT_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -k k8s
+          kubectl -n overmindv set image deployment/arcee arcee="${IMAGE_REGISTRY}/arcee:${IMAGE_TAG}" arcee-migrate="${IMAGE_REGISTRY}/arcee:${IMAGE_TAG}"
+          kubectl -n overmindv set image deployment/laserbeak laserbeak="${IMAGE_REGISTRY}/laserbeak:${IMAGE_TAG}"
+          kubectl -n overmindv set image deployment/soundwave soundwave="${IMAGE_REGISTRY}/soundwave:${IMAGE_TAG}"
+          kubectl -n overmindv rollout status deployment/arcee --timeout=180s
+          kubectl -n overmindv rollout status deployment/laserbeak --timeout=180s
+          kubectl -n overmindv rollout status deployment/soundwave --timeout=180s

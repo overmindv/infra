@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arcee
+  namespace: overmindv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: arcee
+  template:
+    metadata:
+      labels:
+        app: arcee
+    spec:
+      initContainers:
+        - name: arcee-migrate
+          image: overmindv/arcee:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - until goose -dir /app/migrations postgres "$DATABASE_URL" status >/dev/null 2>&1; do sleep 2; done; goose -dir /app/migrations postgres "$DATABASE_URL" up
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: DATABASE_URL } }
+      containers:
+        - name: arcee
+          image: overmindv/arcee:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PORT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_PORT } }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: DATABASE_URL } }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: JWT_SECRET } }
+            - name: JWT_ISSUER
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_ISSUER } }
+            - name: JWT_TTL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_TTL } }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
