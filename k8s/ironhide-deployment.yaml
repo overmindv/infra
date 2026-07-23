@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironhide
+  namespace: overmindv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ironhide
+  template:
+    metadata:
+      labels:
+        app: ironhide
+    spec:
+      initContainers:
+        - name: migrate
+          image: overmindv/ironhide:local
+          command: ["/bin/sh", "-c", "goose -dir /app/migrations postgres \"$IRONHIDE_DATABASE_URL\" up"]
+          env:
+            - name: IRONHIDE_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: IRONHIDE_DATABASE_URL } }
+      containers:
+        - name: ironhide
+          image: overmindv/ironhide:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: IRONHIDE_SERVICE_NAME
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_SERVICE_NAME } }
+            - name: IRONHIDE_HTTP_ADDR
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_HTTP_ADDR } }
+            - name: IRONHIDE_LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_LOG_LEVEL } }
+            - name: IRONHIDE_ENV
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_ENV } }
+            - name: IRONHIDE_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: IRONHIDE_DATABASE_URL } }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }

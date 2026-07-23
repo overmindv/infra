@@ -29,10 +29,16 @@ spec:
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_HEALTH_URL } }
             - name: ARCEE_TIMEOUT
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_TIMEOUT } }
+            - name: IRONHIDE_URL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_URL } }
+            - name: IRONHIDE_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: IRONHIDE_TIMEOUT } }
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: JWT_SECRET } }
             - name: JWT_ISSUER
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_ISSUER } }
+            - name: ADMIN_USER_IDS
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ADMIN_USER_IDS } }
             - name: CORS_ORIGINS
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: CORS_ORIGINS } }
           readinessProbe:
