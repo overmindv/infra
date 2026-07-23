@@ -1,71 +1,63 @@
-# Ratchet infrastructure
+# Ratchet
 
-Ratchet contains no business logic. It owns local orchestration and the Kubernetes baseline for the Overmindv repositories stored as siblings.
+Ratchet - инфраструктурный репозиторий Overmindv. Он отвечает за локальный Docker Compose, Kubernetes-манифесты, сборку образов и базовые проверки окружения.
 
-Arcee and Laserbeak communicate exclusively through `http://arcee:8080/query`. Laserbeak is the backend entry point on host port `8081`; Soundwave is served on `http://localhost:3000` and proxies `/graphql` to Laserbeak. Future `bumblebee`, `optimus-prime` and `mirage` placeholders are behind the Compose profile `future` and do not consume resources by default.
+## Что запускает
 
-## Docker Compose
+Основной локальный стек:
+
+- `arcee` - пользователи, вход, роли, JWT;
+- `ironhide` - каталог университетов, программ, курсов и тем;
+- `laserbeak` - GraphQL API Gateway для frontend;
+- `soundwave` - web frontend;
+- отдельные PostgreSQL инстансы для сервисов-владельцев данных.
+
+Внешняя точка входа backend: `http://localhost:8081/graphql`. Frontend доступен на `http://localhost:3000`.
+
+## Запуск
 
 ```bash
-cd ratchet
 cp .env.example .env
-# Replace POSTGRES_PASSWORD and JWT_SECRET in .env.
-docker compose up -d --build
-# equivalent: make up
+make up
 ```
 
-Startup order is health-gated:
-
-1. PostgreSQL becomes ready.
-2. The Arcee image runs embedded goose migrations.
-3. Arcee becomes DB-healthy.
-4. Laserbeak becomes Arcee-healthy.
-5. Soundwave starts.
-
-Check the stack:
+Проверка стека:
 
 ```bash
 curl http://localhost:8081/health
-open http://localhost:3000
-open http://localhost:8081/playground
 make integration
 ```
 
-Stop and remove the local database volume with `make down`.
-
-## Kubernetes (kind or minikube)
-
-Prerequisites: Docker, `kubectl`, and either [kind](https://kind.sigs.k8s.io/) or [minikube](https://minikube.sigs.k8s.io/docs/). For Ingress, install/enable an NGINX ingress controller (`minikube addons enable ingress` on minikube).
-
-Kind example:
+Остановка с удалением локальных volume:
 
 ```bash
-kind create cluster --name overmindv
-export POSTGRES_PASSWORD='local-db-password'
-export JWT_SECRET='local-long-random-secret'
-export KIND_CLUSTER=overmindv
+make down
+```
+
+## Логи запросов
+
+Laserbeak и Ironhide пишут пользовательские HTTP-запросы и upstream-вызовы отдельно от Docker stdout:
+
+```bash
+make request-logs
+```
+
+Файлы создаются локально в `logs/laserbeak/requests.log` и `logs/ironhide/requests.log` и не хранятся в git. Для поиска ошибки берите `request_id` из ответа GraphQL или лога Laserbeak и ищите его в обоих файлах.
+
+## Команды
+
+```bash
+make up
+make down
+make build
+make push
+make lint
+make test
+make integration
+make render-k8s
 make deploy-k8s
 ```
 
-For minikube, start it and run the same deployment command. The script builds Arcee, Laserbeak and Soundwave images, loads them into the detected local cluster, creates `overmindv-secrets` from environment variables, applies manifests, and waits for rollouts.
+## Особенности
 
-Add `127.0.0.1 overmindv.local` to `/etc/hosts` when the ingress controller is locally reachable, or use:
-
-```bash
-kubectl -n overmindv port-forward service/laserbeak 8081:8081
-```
-
-`k8s/secret.yaml` documents required keys but is deliberately excluded from Kustomize. Never commit real secrets; `scripts/deploy-k8s.sh` creates the Secret from environment variables.
-
-## Commands
-
-```bash
-make up           # complete Compose stack
-make down         # stop and delete volumes
-make build        # build Arcee/Laserbeak/Soundwave images
-make push         # push images to IMAGE_REGISTRY
-make test         # validate Compose and run backend/frontend tests
-make integration  # registration and login through the gateway
-make render-k8s   # render manifests
-make deploy-k8s   # local kind/minikube deployment
-```
+Bootstrap-суперпользователь создаётся Arcee при старте, если соответствующие значения заданы в `.env`. Этот пользователь нужен для назначения первых администраторов. Администраторы управляют пользователями и каталогом через Laserbeak; обычные пользователи получают read-only функционал frontend.

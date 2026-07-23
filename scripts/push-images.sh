@@ -8,5 +8,6 @@ cd "$ROOT"
 TAG="${IMAGE_TAG:-latest}"
 
 docker push "${IMAGE_REGISTRY}/arcee:${TAG}"
+docker push "${IMAGE_REGISTRY}/ironhide:${TAG}"
 docker push "${IMAGE_REGISTRY}/laserbeak:${TAG}"
 docker push "${IMAGE_REGISTRY}/soundwave:${TAG}"

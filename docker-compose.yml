@@ -37,11 +37,67 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-arcee}
       JWT_TTL: ${JWT_TTL:-24h}
+      BOOTSTRAP_SUPERUSER_EMAIL: ${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmind.v}
+      BOOTSTRAP_SUPERUSER_PASSWORD: ${BOOTSTRAP_SUPERUSER_PASSWORD:-zaqwsxcde}
+      BOOTSTRAP_SUPERUSER_USERNAME: ${BOOTSTRAP_SUPERUSER_USERNAME:-superadmin}
     depends_on:
       arcee-migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
+  ironhide-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ironhide
+      POSTGRES_USER: ironhide
+      POSTGRES_PASSWORD: ${IRONHIDE_POSTGRES_PASSWORD:?set IRONHIDE_POSTGRES_PASSWORD in .env}
+    ports:
+      - "${IRONHIDE_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - ironhide-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ironhide -d ironhide"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  ironhide-migrate:
+    build: ../ironhide
+    environment:
+      IRONHIDE_DATABASE_URL: "postgres://ironhide:${IRONHIDE_POSTGRES_PASSWORD}@ironhide-postgres:5432/ironhide?sslmode=disable"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["goose -dir /app/migrations postgres \"$$IRONHIDE_DATABASE_URL\" up"]
+    depends_on:
+      ironhide-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  ironhide:
+    build: ../ironhide
+    environment:
+      IRONHIDE_SERVICE_NAME: ironhide
+      IRONHIDE_HTTP_ADDR: ":8080"
+      IRONHIDE_GRPC_ADDR: ":9090"
+      IRONHIDE_DATABASE_URL: "postgres://ironhide:${IRONHIDE_POSTGRES_PASSWORD}@ironhide-postgres:5432/ironhide?sslmode=disable"
+      IRONHIDE_LOG_LEVEL: ${IRONHIDE_LOG_LEVEL:-debug}
+      IRONHIDE_ENV: local
+      IRONHIDE_REQUEST_LOG_PATH: ${IRONHIDE_REQUEST_LOG_PATH:-/var/log/ironhide/requests.log}
+    depends_on:
+      ironhide-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${IRONHIDE_PORT:-8082}:8080"
+    volumes:
+      - ./logs/ironhide:/var/log/ironhide
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ready >/dev/null"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -55,14 +111,22 @@ services:
       ARCEE_GRAPHQL_URL: http://arcee:8080/query
       ARCEE_HEALTH_URL: http://arcee:8080/health
       ARCEE_TIMEOUT: ${ARCEE_TIMEOUT:-5s}
+      IRONHIDE_URL: http://ironhide:8080
+      IRONHIDE_TIMEOUT: ${IRONHIDE_TIMEOUT:-5s}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-arcee}
+      ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      REQUEST_LOG_PATH: ${REQUEST_LOG_PATH:-/var/log/laserbeak/requests.log}
     depends_on:
       arcee:
         condition: service_healthy
+      ironhide:
+        condition: service_healthy
     ports:
       - "${LASERBEAK_PORT:-8081}:8081"
+    volumes:
+      - ./logs/laserbeak:/var/log/laserbeak
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health >/dev/null"]
       interval: 5s
@@ -108,3 +172,4 @@ services:
 
 volumes:
   arcee-postgres:
+  ironhide-postgres:

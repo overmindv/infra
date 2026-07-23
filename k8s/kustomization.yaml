@@ -5,6 +5,9 @@ resources:
   - configmap.yaml
   - postgres-deployment.yaml
   - postgres-service.yaml
+  - ironhide-postgres.yaml
+  - ironhide-deployment.yaml
+  - ironhide-service.yaml
   - arcee-deployment.yaml
   - arcee-service.yaml
   - laserbeak-deployment.yaml

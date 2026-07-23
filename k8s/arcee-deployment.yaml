@@ -41,6 +41,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_ISSUER } }
             - name: JWT_TTL
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: JWT_TTL } }
+            - name: BOOTSTRAP_SUPERUSER_EMAIL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: BOOTSTRAP_SUPERUSER_EMAIL } }
+            - name: BOOTSTRAP_SUPERUSER_PASSWORD
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: BOOTSTRAP_SUPERUSER_PASSWORD } }
+            - name: BOOTSTRAP_SUPERUSER_USERNAME
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: BOOTSTRAP_SUPERUSER_USERNAME } }
           readinessProbe:
             httpGet: { path: /health, port: http }
             periodSeconds: 5
