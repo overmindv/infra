@@ -4,8 +4,9 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
-: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
-: "${IRONHIDE_POSTGRES_PASSWORD:?IRONHIDE_POSTGRES_PASSWORD is required}"
+: "${USERS_POSTGRES_PASSWORD:?USERS_POSTGRES_PASSWORD is required}"
+: "${ENTITIES_POSTGRES_PASSWORD:?ENTITIES_POSTGRES_PASSWORD is required}"
+: "${TASKS_IT_POSTGRES_PASSWORD:?TASKS_IT_POSTGRES_PASSWORD is required}"
 : "${JWT_SECRET:?JWT_SECRET is required}"
 : "${BOOTSTRAP_SUPERUSER_EMAIL:?BOOTSTRAP_SUPERUSER_EMAIL is required}"
 : "${BOOTSTRAP_SUPERUSER_PASSWORD:?BOOTSTRAP_SUPERUSER_PASSWORD is required}"
@@ -16,35 +17,52 @@ NAMESPACE="${K8S_NAMESPACE:-overmindv}"
 
 IMAGE_REGISTRY="$REGISTRY" IMAGE_TAG="$TAG" ./scripts/build-images.sh
 
+# Локальный кластер получает собранные образы без внешнего registry.
 if command -v kind >/dev/null 2>&1 && kind get clusters | grep -qx "${KIND_CLUSTER:-overmindv}"; then
-  kind load docker-image --name "${KIND_CLUSTER:-overmindv}" "${REGISTRY}/arcee:${TAG}" "${REGISTRY}/ironhide:${TAG}" "${REGISTRY}/laserbeak:${TAG}" "${REGISTRY}/soundwave:${TAG}"
+  kind load docker-image --name "${KIND_CLUSTER:-overmindv}" \
+    "${REGISTRY}/users:${TAG}" \
+    "${REGISTRY}/entities:${TAG}" \
+    "${REGISTRY}/tasks-it:${TAG}" \
+    "${REGISTRY}/api-gateway:${TAG}" \
+    "${REGISTRY}/frontend:${TAG}"
 elif command -v minikube >/dev/null 2>&1 && minikube status >/dev/null 2>&1; then
-  minikube image load "${REGISTRY}/arcee:${TAG}"
-  minikube image load "${REGISTRY}/ironhide:${TAG}"
-  minikube image load "${REGISTRY}/laserbeak:${TAG}"
-  minikube image load "${REGISTRY}/soundwave:${TAG}"
+  minikube image load "${REGISTRY}/users:${TAG}"
+  minikube image load "${REGISTRY}/entities:${TAG}"
+  minikube image load "${REGISTRY}/tasks-it:${TAG}"
+  minikube image load "${REGISTRY}/api-gateway:${TAG}"
+  minikube image load "${REGISTRY}/frontend:${TAG}"
 fi
 
 kubectl apply -f k8s/namespace.yaml
+
+# Secret создаётся отдельно, чтобы секреты не попадали в git.
 kubectl -n "$NAMESPACE" create secret generic overmindv-secrets \
-  --from-literal=POSTGRES_DB="${POSTGRES_DB:-arcee}" \
-  --from-literal=POSTGRES_USER="${POSTGRES_USER:-postgres}" \
-  --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-  --from-literal=DATABASE_URL="postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-arcee}?sslmode=disable" \
-  --from-literal=IRONHIDE_POSTGRES_PASSWORD="$IRONHIDE_POSTGRES_PASSWORD" \
-  --from-literal=IRONHIDE_DATABASE_URL="postgres://ironhide:${IRONHIDE_POSTGRES_PASSWORD}@ironhide-postgres:5432/ironhide?sslmode=disable" \
+  --from-literal=USERS_POSTGRES_PASSWORD="$USERS_POSTGRES_PASSWORD" \
+  --from-literal=USERS_DATABASE_URL="postgres://postgres:${USERS_POSTGRES_PASSWORD}@users-postgres:5432/users?sslmode=disable" \
+  --from-literal=ENTITIES_POSTGRES_PASSWORD="$ENTITIES_POSTGRES_PASSWORD" \
+  --from-literal=ENTITIES_DATABASE_URL="postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable" \
+  --from-literal=TASKS_IT_POSTGRES_PASSWORD="$TASKS_IT_POSTGRES_PASSWORD" \
+  --from-literal=TASKS_IT_DATABASE_URL="postgres://tasks_it:${TASKS_IT_POSTGRES_PASSWORD}@tasks-it-postgres:5432/tasks_it?sslmode=disable" \
   --from-literal=JWT_SECRET="$JWT_SECRET" \
   --from-literal=BOOTSTRAP_SUPERUSER_EMAIL="$BOOTSTRAP_SUPERUSER_EMAIL" \
   --from-literal=BOOTSTRAP_SUPERUSER_PASSWORD="$BOOTSTRAP_SUPERUSER_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl apply -k k8s
-kubectl -n "$NAMESPACE" set image deployment/arcee arcee="${REGISTRY}/arcee:${TAG}" arcee-migrate="${REGISTRY}/arcee:${TAG}"
-kubectl -n "$NAMESPACE" set image deployment/ironhide ironhide="${REGISTRY}/ironhide:${TAG}" migrate="${REGISTRY}/ironhide:${TAG}"
-kubectl -n "$NAMESPACE" set image deployment/laserbeak laserbeak="${REGISTRY}/laserbeak:${TAG}"
-kubectl -n "$NAMESPACE" set image deployment/soundwave soundwave="${REGISTRY}/soundwave:${TAG}"
-kubectl -n "$NAMESPACE" rollout status deployment/arcee --timeout=180s
-kubectl -n "$NAMESPACE" rollout status deployment/ironhide-postgres --timeout=180s
-kubectl -n "$NAMESPACE" rollout status deployment/ironhide --timeout=180s
-kubectl -n "$NAMESPACE" rollout status deployment/laserbeak --timeout=180s
-kubectl -n "$NAMESPACE" rollout status deployment/soundwave --timeout=180s
+kubectl -n "$NAMESPACE" set image deployment/users users="${REGISTRY}/users:${TAG}" users-migrate="${REGISTRY}/users:${TAG}"
+kubectl -n "$NAMESPACE" set image deployment/entities entities="${REGISTRY}/entities:${TAG}" entities-migrate="${REGISTRY}/entities:${TAG}"
+kubectl -n "$NAMESPACE" set image deployment/tasks-it tasks-it="${REGISTRY}/tasks-it:${TAG}" tasks-it-migrate="${REGISTRY}/tasks-it:${TAG}"
+kubectl -n "$NAMESPACE" set image deployment/api-gateway api-gateway="${REGISTRY}/api-gateway:${TAG}"
+kubectl -n "$NAMESPACE" set image deployment/frontend frontend="${REGISTRY}/frontend:${TAG}"
+
+for deployment in \
+  users-postgres \
+  entities-postgres \
+  tasks-it-postgres \
+  users \
+  entities \
+  tasks-it \
+  api-gateway \
+  frontend; do
+  kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=180s
+done

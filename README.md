@@ -1,63 +1,88 @@
-# Ratchet
+# Infra
 
-Ratchet - инфраструктурный репозиторий Overmindv. Он отвечает за локальный Docker Compose, Kubernetes-манифесты, сборку образов и базовые проверки окружения.
+Репозиторий содержит локальный Docker Compose, Kubernetes-манифесты, сборку образов и интеграционную проверку Overmindv.
 
-## Что запускает
+## Состав окружения
 
-Основной локальный стек:
+Основной стек запускает:
 
-- `arcee` - пользователи, вход, роли, JWT;
-- `ironhide` - каталог университетов, программ, курсов и тем;
-- `laserbeak` - GraphQL API Gateway для frontend;
-- `soundwave` - web frontend;
-- отдельные PostgreSQL инстансы для сервисов-владельцев данных.
+- `users` — пользователи, роли и JWT;
+- `entities` — университеты, программы, курсы и темы;
+- `tasks-it` — версионированные IT-тесты и история решений;
+- `api-gateway` — внешний GraphQL API;
+- `frontend` — web-интерфейс;
+- отдельный PostgreSQL для каждого сервиса-владельца данных.
 
-Внешняя точка входа backend: `http://localhost:8081/graphql`. Frontend доступен на `http://localhost:3000`.
+`content` и `media` пока оставлены только в опциональном Compose-профиле `future`. Новые артефакты используют актуальные названия сервисов. Legacy-названия переменных `ARCEE_*` и `IRONHIDE_*` встречаются только в runtime-контракте существующего `api-gateway`; инфраструктурные ресурсы и сетевые имена уже новые.
 
-## Запуск
+## Локальный запуск
 
 ```bash
 cp .env.example .env
 make up
 ```
 
-Проверка стека:
+После запуска доступны:
+
+- frontend — `http://localhost:3000`;
+- GraphQL API — `http://localhost:8081/graphql`;
+- health api-gateway — `http://localhost:8081/health`;
+- PostgreSQL `users` — `localhost:5432`;
+- PostgreSQL `entities` — `localhost:5433`;
+- PostgreSQL `tasks-it` — `localhost:5434`.
+
+`tasks-it` не публикует HTTP-порт на хост и доступен только по имени `http://tasks-it:8080` во внутренней сети Compose. Пользовательские запросы идут через `api-gateway`.
+
+Для каждого backend-сервиса Compose сначала ждёт PostgreSQL, затем выполняет `goose up` отдельным migration-контейнером. Приложение стартует только после успешного завершения миграций.
+
+## Проверка и логи
 
 ```bash
-curl http://localhost:8081/health
-make integration
-```
-
-Остановка с удалением локальных volume:
-
-```bash
-make down
-```
-
-## Логи запросов
-
-Laserbeak и Ironhide пишут пользовательские HTTP-запросы и upstream-вызовы отдельно от Docker stdout:
-
-```bash
-make request-logs
-```
-
-Файлы создаются локально в `logs/laserbeak/requests.log` и `logs/ironhide/requests.log` и не хранятся в git. Для поиска ошибки берите `request_id` из ответа GraphQL или лога Laserbeak и ищите его в обоих файлах.
-
-## Команды
-
-```bash
-make up
-make down
-make build
-make push
 make lint
 make test
 make integration
-make render-k8s
+make logs
+```
+
+`make integration` проверяет полный путь через GraphQL: регистрацию и роли, создание каталога, создание и публикацию IT-теста, скрытие правильного ответа, решение теста и историю решений.
+
+Остановить окружение и удалить локальные volumes:
+
+```bash
+make down
+```
+
+## Kubernetes
+
+Манифесты создают три независимых PostgreSQL, init-контейнеры миграций, внутренний Service `tasks-it:8080`, probes и ресурсы для всех workloads. `tasks-it` намеренно не добавлен в Ingress.
+
+Перед локальным развёртыванием задайте секреты:
+
+```bash
+export USERS_POSTGRES_PASSWORD='change-me'
+export ENTITIES_POSTGRES_PASSWORD='change-me'
+export TASKS_IT_POSTGRES_PASSWORD='change-me'
+export JWT_SECRET='change-me-long-random-value'
+export BOOTSTRAP_SUPERUSER_EMAIL='admin@overmindv.local'
+export BOOTSTRAP_SUPERUSER_PASSWORD='change-me'
 make deploy-k8s
 ```
 
-## Особенности
+Скрипт создаёт Kubernetes Secret через `kubectl`; значения секретов не хранятся в манифестах. Файл `k8s/secret.yaml` служит только примером и не входит в `kustomization.yaml`.
 
-Bootstrap-суперпользователь создаётся Arcee при старте, если соответствующие значения заданы в `.env`. Этот пользователь нужен для назначения первых администраторов. Администраторы управляют пользователями и каталогом через Laserbeak; обычные пользователи получают read-only функционал frontend.
+Проверить итоговые ресурсы без применения:
+
+```bash
+make render-k8s
+```
+
+Для Ingress добавьте `overmindv.local` в локальный DNS или `/etc/hosts`. Внешние маршруты ведут только к `frontend` и `api-gateway`.
+
+## Образы
+
+```bash
+make build
+IMAGE_REGISTRY=registry.example.com/overmindv IMAGE_TAG=latest make push
+```
+
+Собираются образы `users`, `entities`, `tasks-it`, `api-gateway` и `frontend`.

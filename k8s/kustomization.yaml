@@ -3,15 +3,12 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - configmap.yaml
-  - postgres-deployment.yaml
-  - postgres-service.yaml
-  - ironhide-postgres.yaml
-  - ironhide-deployment.yaml
-  - ironhide-service.yaml
-  - arcee-deployment.yaml
-  - arcee-service.yaml
-  - laserbeak-deployment.yaml
-  - laserbeak-service.yaml
-  - soundwave-deployment.yaml
-  - soundwave-service.yaml
+  - users-postgres.yaml
+  - entities-postgres.yaml
+  - tasks-it-postgres.yaml
+  - users-deployment.yaml
+  - entities-deployment.yaml
+  - tasks-it-deployment.yaml
+  - api-gateway-deployment.yaml
+  - frontend-deployment.yaml
   - ingress.yaml

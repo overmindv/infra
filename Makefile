@@ -20,13 +20,11 @@ push:
 
 # Логи
 logs:
-	$(COMPOSE) logs -f arcee ironhide laserbeak
+	$(COMPOSE) logs -f users entities tasks-it api-gateway frontend
 
-# Логи пользовательских запросов Laserbeak и Ironhide без healthcheck-шумa
+# Логи сервисов, обрабатывающих пользовательские запросы
 request-logs:
-	mkdir -p logs/laserbeak logs/ironhide
-	touch logs/laserbeak/requests.log logs/ironhide/requests.log
-	tail -f logs/laserbeak/requests.log logs/ironhide/requests.log
+	$(COMPOSE) logs -f api-gateway entities tasks-it
 
 # Быстрая проверка инфраструктурных файлов
 lint:
@@ -35,11 +33,12 @@ lint:
 
 # Запуск тестов
 test: lint
-	$(MAKE) -C ../arcee test
-	cd ../ironhide && go test ./...
-	$(MAKE) -C ../laserbeak test
-	npm --prefix ../soundwave run typecheck
-	npm --prefix ../soundwave run test:ci
+	$(MAKE) -C ../users test
+	cd ../entities && go test ./...
+	$(MAKE) -C ../tasks-it test
+	$(MAKE) -C ../api-gateway test
+	npm --prefix ../frontend run typecheck
+	npm --prefix ../frontend run test:ci
 
 # Запуск интеграционных тестов
 integration:
