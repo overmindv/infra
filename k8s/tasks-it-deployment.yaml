@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tasks-it
+  namespace: overmindv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tasks-it
+  template:
+    metadata:
+      labels:
+        app: tasks-it
+    spec:
+      initContainers:
+        - name: tasks-it-migrate
+          image: overmindv/tasks-it:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "goose -dir /app/migrations postgres \"$DATABASE_URL\" up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASKS_IT_DATABASE_URL } }
+      containers:
+        - name: tasks-it
+          image: overmindv/tasks-it:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SERVICE_NAME
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_SERVICE_NAME } }
+            - name: HTTP_ADDR
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_HTTP_ADDR } }
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASKS_IT_DATABASE_URL } }
+            - name: LOG_LEVEL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_LOG_LEVEL } }
+            - name: ENV
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_ENV } }
+            - name: READ_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_READ_TIMEOUT } }
+            - name: WRITE_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_WRITE_TIMEOUT } }
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tasks-it
+  namespace: overmindv
+spec:
+  selector:
+    app: tasks-it
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
