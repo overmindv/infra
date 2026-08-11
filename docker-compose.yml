@@ -139,6 +139,7 @@ services:
       ENV: local
       READ_TIMEOUT: ${TASKS_IT_READ_TIMEOUT:-10s}
       WRITE_TIMEOUT: ${TASKS_IT_WRITE_TIMEOUT:-20s}
+      TASK_HUNTER_INGEST_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
     depends_on:
       tasks-it-migrate:
         condition: service_completed_successfully
@@ -148,6 +149,61 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
+    restart: unless-stopped
+
+  task-hunter-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: task_hunter
+      POSTGRES_USER: task_hunter
+      POSTGRES_PASSWORD: ${TASK_HUNTER_POSTGRES_PASSWORD:?set TASK_HUNTER_POSTGRES_PASSWORD in .env}
+    volumes:
+      - task-hunter-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U task_hunter -d task_hunter"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  task-hunter-migrate:
+    build: ../task-hunter
+    environment:
+      DATABASE_URL: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    depends_on:
+      task-hunter-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  task-hunter:
+    build: ../task-hunter
+    environment:
+      PARSER_DATABASE_DSN: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
+      PARSER_HTTP_ADDRESS: ":8080"
+      PARSER_SCHEDULE_COLLECTCRON: "${TASK_HUNTER_CRON:-0 */6 * * *}"
+      PARSER_TASKSIT_URL: http://tasks-it:8080
+      PARSER_TASKSIT_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
+      PARSER_SECURITY_GATEWAYTOKEN: ${TASK_HUNTER_GATEWAY_TOKEN:?set TASK_HUNTER_GATEWAY_TOKEN in .env}
+      PARSER_TELEGRAM_APIID: ${TASK_HUNTER_TELEGRAM_API_ID:?set TASK_HUNTER_TELEGRAM_API_ID in .env}
+      PARSER_TELEGRAM_APIHASH: ${TASK_HUNTER_TELEGRAM_API_HASH:?set TASK_HUNTER_TELEGRAM_API_HASH in .env}
+      PARSER_TELEGRAM_SESSIONPATH: /var/lib/task-hunter/telegram.session
+      PARSER_TELEGRAM_CHANNELS: ${TASK_HUNTER_TELEGRAM_CHANNELS:-analytic_postupashki,postupashki_ml,algoses}
+      PARSER_WORKER_DEFAULTLIMIT: ${TASK_HUNTER_DEFAULT_LIMIT:-100}
+    volumes:
+      - task-hunter-session:/var/lib/task-hunter
+    depends_on:
+      task-hunter-migrate:
+        condition: service_completed_successfully
+      tasks-it:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   api-gateway:
@@ -161,6 +217,9 @@ services:
       IRONHIDE_TIMEOUT: ${ENTITIES_TIMEOUT:-5s}
       TASKS_IT_URL: http://tasks-it:8080
       TASKS_IT_TIMEOUT: ${TASKS_IT_TIMEOUT:-5s}
+      TASK_HUNTER_URL: http://task-hunter:8080
+      TASK_HUNTER_TOKEN: ${TASK_HUNTER_GATEWAY_TOKEN:?set TASK_HUNTER_GATEWAY_TOKEN in .env}
+      TASK_HUNTER_TIMEOUT: ${TASK_HUNTER_TIMEOUT:-10s}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
@@ -172,6 +231,8 @@ services:
       entities:
         condition: service_healthy
       tasks-it:
+        condition: service_healthy
+      task-hunter:
         condition: service_healthy
     ports:
       - "${API_GATEWAY_PORT:-8081}:8081"
@@ -216,3 +277,5 @@ volumes:
   users-postgres:
   entities-postgres:
   tasks-it-postgres:
+  task-hunter-postgres:
+  task-hunter-session:

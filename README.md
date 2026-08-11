@@ -9,9 +9,10 @@
 - `users` — пользователи, роли и JWT;
 - `entities` — университеты, программы, курсы и темы;
 - `tasks-it` — версионированные IT-тесты и история решений;
+- `task-hunter` — персистентная очередь сбора кандидатов и Telegram checkpoint'ы;
 - `api-gateway` — внешний GraphQL API;
 - `frontend` — web-интерфейс;
-- отдельный PostgreSQL для каждого сервиса-владельца данных.
+- отдельный PostgreSQL для каждого сервиса-владельца данных. `task-hunter` передаёт кандидатов в `tasks-it` только через защищённый внутренний API.
 
 `content` и `media` пока оставлены только в опциональном Compose-профиле `future`. Новые артефакты используют актуальные названия сервисов. Legacy-названия переменных `ARCEE_*` и `IRONHIDE_*` встречаются только в runtime-контракте существующего `api-gateway`; инфраструктурные ресурсы и сетевые имена уже новые.
 
@@ -30,6 +31,8 @@ make up
 - PostgreSQL `users` — `localhost:5432`;
 - PostgreSQL `entities` — `localhost:5433`;
 - PostgreSQL `tasks-it` — `localhost:5434`.
+
+`task-hunter` и его PostgreSQL доступны только во внутренней Compose-сети. Перед первым запуском подготовьте MTProto session по инструкции `task-hunter/docs/telegram-session.md` и поместите её в volume `task-hunter-session`; сервис не публикуется через Ingress.
 
 `tasks-it` не публикует HTTP-порт на хост и доступен только по имени `http://tasks-it:8080` во внутренней сети Compose. Пользовательские запросы идут через `api-gateway`.
 
@@ -54,7 +57,7 @@ make down
 
 ## Kubernetes
 
-Манифесты создают три независимых PostgreSQL, init-контейнеры миграций, внутренний Service `tasks-it:8080`, probes и ресурсы для всех workloads. `tasks-it` намеренно не добавлен в Ingress.
+Манифесты создают четыре независимых PostgreSQL, init-контейнеры миграций, внутренние Service `tasks-it:8080` и `task-hunter:8080`, probes и ресурсы для workloads. Оба backend-сервиса намеренно не добавлены в Ingress.
 
 Перед локальным развёртыванием задайте секреты:
 
@@ -62,6 +65,11 @@ make down
 export USERS_POSTGRES_PASSWORD='change-me'
 export ENTITIES_POSTGRES_PASSWORD='change-me'
 export TASKS_IT_POSTGRES_PASSWORD='change-me'
+export TASK_HUNTER_POSTGRES_PASSWORD='change-me'
+export TASK_HUNTER_INGEST_TOKEN='change-me-long-random-value'
+export TASK_HUNTER_GATEWAY_TOKEN='change-me-long-random-value'
+export TASK_HUNTER_TELEGRAM_API_ID='123456'
+export TASK_HUNTER_TELEGRAM_API_HASH='change-me'
 export JWT_SECRET='change-me-long-random-value'
 export BOOTSTRAP_SUPERUSER_EMAIL='admin@overmindv.local'
 export BOOTSTRAP_SUPERUSER_PASSWORD='change-me'
@@ -85,4 +93,4 @@ make build
 IMAGE_REGISTRY=registry.example.com/overmindv IMAGE_TAG=latest make push
 ```
 
-Собираются образы `users`, `entities`, `tasks-it`, `api-gateway` и `frontend`.
+Собираются образы `users`, `entities`, `tasks-it`, `task-hunter`, `api-gateway` и `frontend`.

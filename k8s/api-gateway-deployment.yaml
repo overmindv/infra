@@ -37,6 +37,12 @@ spec:
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_URL } }
             - name: TASKS_IT_TIMEOUT
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_TIMEOUT } }
+            - name: TASK_HUNTER_URL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_URL } }
+            - name: TASK_HUNTER_TIMEOUT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_TIMEOUT } }
+            - name: TASK_HUNTER_TOKEN
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_GATEWAY_TOKEN } }
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: JWT_SECRET } }
             - name: JWT_ISSUER
