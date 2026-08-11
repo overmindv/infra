@@ -59,6 +59,8 @@ spec:
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_INGEST_TOKEN } }
             - name: PARSER_SECURITY_GATEWAYTOKEN
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_GATEWAY_TOKEN } }
+            - name: PARSER_TELEGRAM_ENABLED
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_TELEGRAM_ENABLED } }
             - name: PARSER_TELEGRAM_APIID
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_TELEGRAM_API_ID } }
             - name: PARSER_TELEGRAM_APIHASH
