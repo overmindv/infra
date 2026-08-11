@@ -5,6 +5,10 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
 ENV_FILE="${INFRA_ENV_FILE:-./.env}"
+case "$ENV_FILE" in
+  /*|*/*) ;;
+  *) ENV_FILE="./$ENV_FILE" ;;
+esac
 if [ -f "$ENV_FILE" ]; then
   set -a
   . "$ENV_FILE"
