@@ -26,6 +26,7 @@ data:
   TASK_HUNTER_TIMEOUT: "10s"
   TASK_HUNTER_CRON: "0 */6 * * *"
   TASK_HUNTER_DEFAULT_LIMIT: "100"
+  TASK_HUNTER_CODEFORCES_READER_URL: "https://r.jina.ai/http://codeforces.com"
   TASK_HUNTER_TELEGRAM_ENABLED: "true"
   TASK_HUNTER_TELEGRAM_CHANNELS: "analytic_postupashki,postupashki_ml,algoses"
   API_GATEWAY_PORT: "8081"

@@ -71,6 +71,8 @@ spec:
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_TELEGRAM_CHANNELS } }
             - name: PARSER_WORKER_DEFAULTLIMIT
               valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_DEFAULT_LIMIT } }
+            - name: PARSER_WEBSITE_CODEFORCESREADERURL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_CODEFORCES_READER_URL } }
           volumeMounts:
             - name: telegram-session
               mountPath: /var/lib/task-hunter
