@@ -1,40 +1,40 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: arcee
+  name: users
   namespace: overmindv
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: arcee
+      app: users
   template:
     metadata:
       labels:
-        app: arcee
+        app: users
     spec:
       initContainers:
-        - name: arcee-migrate
-          image: overmindv/arcee:local
+        - name: users-migrate
+          image: overmindv/users:local
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
-            - until goose -dir /app/migrations postgres "$DATABASE_URL" status >/dev/null 2>&1; do sleep 2; done; goose -dir /app/migrations postgres "$DATABASE_URL" up
+            - goose -dir /app/migrations postgres "$DATABASE_URL" up
           env:
             - name: DATABASE_URL
-              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: DATABASE_URL } }
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: USERS_DATABASE_URL } }
       containers:
-        - name: arcee
-          image: overmindv/arcee:local
+        - name: users
+          image: overmindv/users:local
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
           env:
             - name: PORT
-              valueFrom: { configMapKeyRef: { name: overmindv-config, key: ARCEE_PORT } }
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: USERS_PORT } }
             - name: DATABASE_URL
-              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: DATABASE_URL } }
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: USERS_DATABASE_URL } }
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: overmindv-secrets, key: JWT_SECRET } }
             - name: JWT_ISSUER
@@ -61,3 +61,16 @@ spec:
           resources:
             requests: { cpu: 50m, memory: 64Mi }
             limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: users
+  namespace: overmindv
+spec:
+  selector:
+    app: users
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,27 +1,28 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: soundwave
+  name: frontend
   namespace: overmindv
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: soundwave
+      app: frontend
   template:
     metadata:
       labels:
-        app: soundwave
+        app: frontend
     spec:
       containers:
-        - name: soundwave
-          image: overmindv/soundwave:local
+        - name: frontend
+          image: overmindv/frontend:local
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 3000
           readinessProbe:
             httpGet: { path: /, port: http }
+            initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet: { path: /, port: http }
@@ -32,11 +33,24 @@ spec:
             readOnlyRootFilesystem: true
             runAsNonRoot: true
           volumeMounts:
-            - name: nginx-tmp
+            - name: tmp
               mountPath: /tmp
           resources:
             requests: { cpu: 25m, memory: 32Mi }
             limits: { cpu: 250m, memory: 128Mi }
       volumes:
-        - name: nginx-tmp
+        - name: tmp
           emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: overmindv
+spec:
+  selector:
+    app: frontend
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

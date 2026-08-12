@@ -1,0 +1,110 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: task-hunter-session
+  namespace: overmindv
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 100Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-hunter
+  namespace: overmindv
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: task-hunter
+  template:
+    metadata:
+      labels:
+        app: task-hunter
+    spec:
+      securityContext:
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: task-hunter-migrate
+          image: overmindv/task-hunter:local
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c", "goose -dir /app/migrations postgres \"$DATABASE_URL\" up"]
+          env:
+            - name: DATABASE_URL
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_DATABASE_URL } }
+      containers:
+        - name: task-hunter
+          image: overmindv/task-hunter:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: PARSER_DATABASE_DSN
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_DATABASE_URL } }
+            - name: PARSER_HTTP_ADDRESS
+              value: ":8080"
+            - name: PARSER_SCHEDULE_COLLECTCRON
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_CRON } }
+            - name: PARSER_TASKSIT_URL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASKS_IT_URL } }
+            - name: PARSER_TASKSIT_TOKEN
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_INGEST_TOKEN } }
+            - name: PARSER_SECURITY_GATEWAYTOKEN
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_GATEWAY_TOKEN } }
+            - name: PARSER_TELEGRAM_ENABLED
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_TELEGRAM_ENABLED } }
+            - name: PARSER_TELEGRAM_APIID
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_TELEGRAM_API_ID } }
+            - name: PARSER_TELEGRAM_APIHASH
+              valueFrom: { secretKeyRef: { name: overmindv-secrets, key: TASK_HUNTER_TELEGRAM_API_HASH } }
+            - name: PARSER_TELEGRAM_SESSIONPATH
+              value: /var/lib/task-hunter/telegram.session
+            - name: PARSER_TELEGRAM_CHANNELS
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_TELEGRAM_CHANNELS } }
+            - name: PARSER_WORKER_DEFAULTLIMIT
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_DEFAULT_LIMIT } }
+            - name: PARSER_WEBSITE_CODEFORCESREADERURL
+              valueFrom: { configMapKeyRef: { name: overmindv-config, key: TASK_HUNTER_CODEFORCES_READER_URL } }
+          volumeMounts:
+            - name: telegram-session
+              mountPath: /var/lib/task-hunter
+          readinessProbe:
+            httpGet: { path: /ready, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 1, memory: 512Mi }
+      volumes:
+        - name: telegram-session
+          persistentVolumeClaim:
+            claimName: task-hunter-session
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-hunter
+  namespace: overmindv
+spec:
+  selector:
+    app: task-hunter
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
