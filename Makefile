@@ -1,54 +1,98 @@
-COMPOSE := docker compose -f docker-compose.yml
+ENV_FILE ?= .env
+COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
+.DEFAULT_GOAL := help
 
-.PHONY: up down build push logs request-logs lint test integration deploy-k8s render-k8s
+.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration deploy-k8s render-k8s
 
-# Запуск
-up:
-	$(COMPOSE) up --build -d
+# Краткая справка по локальному запуску
+help:
+	@echo "make up             Собрать и запустить весь локальный стек"
+	@echo "make down           Остановить стек и сохранить данные"
+	@echo "make clean          Остановить стек и удалить локальные базы"
+	@echo "make status         Показать состояние контейнеров"
+	@echo "make logs           Показать логи"
+	@echo "make kafka-check    Проверить создание topic'ов и обмен сообщениями"
+	@echo "make credentials    Показать URL и локального администратора"
+	@echo "make telegram-login Создать опциональную Telegram session"
 
-# Остановка
-down:
-	$(COMPOSE) down -v --remove-orphans
+# Подготовка локального env с автоматически сгенерированными секретами
+init:
+	@./scripts/prepare-env.sh $(ENV_FILE)
 
-# Сборка
+# Сборка и запуск всего локального стека с ожиданием готовности
+up: init
+	@./scripts/preflight.sh $(ENV_FILE)
+	@$(COMPOSE) up --build -d --wait --wait-timeout 300
+	@./scripts/show-local-info.sh $(ENV_FILE)
+
+# Остановка контейнеров с сохранением данных
+down: init
+	@$(COMPOSE) down --remove-orphans
+
+# Полное удаление контейнеров и локальных баз данных
+clean: init
+	@$(COMPOSE) down -v --remove-orphans
+
+# Перезапуск стека без удаления данных
+restart: down up
+
+# Состояние всех контейнеров
+status: init
+	@$(COMPOSE) ps
+
+# Адреса и локальная учётная запись администратора
+credentials: init
+	@./scripts/show-local-info.sh $(ENV_FILE)
+
+# Интерактивное создание Telegram MTProto session
+telegram-login: init
+	@./scripts/telegram-login.sh $(ENV_FILE)
+
+# Сборка production-образов
 build:
-	./scripts/build-images.sh
+	@./scripts/build-images.sh
 
-# Push previously built images to IMAGE_REGISTRY
+# Публикация ранее собранных образов
 push:
-	./scripts/push-images.sh
+	@./scripts/push-images.sh
 
-# Логи
-logs:
-	$(COMPOSE) logs -f arcee ironhide laserbeak
+# Логи основных сервисов
+logs: init
+	@$(COMPOSE) logs -f kafka users entities tasks-it task-hunter api-gateway frontend
 
-# Логи пользовательских запросов Laserbeak и Ironhide без healthcheck-шумa
-request-logs:
-	mkdir -p logs/laserbeak logs/ironhide
-	touch logs/laserbeak/requests.log logs/ironhide/requests.log
-	tail -f logs/laserbeak/requests.log logs/ironhide/requests.log
+# Логи сервисов, обрабатывающих пользовательские запросы
+request-logs: init
+	@$(COMPOSE) logs -f api-gateway entities tasks-it task-hunter
+
+# Проверка Kafka и полного цикла producer/consumer на временном topic'е
+kafka-check: init
+	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/kafka.sh
 
 # Быстрая проверка инфраструктурных файлов
 lint:
-	docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
-	sh -n scripts/build-images.sh scripts/deploy-k8s.sh scripts/push-images.sh tests/integration.sh
+	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
+	@kubectl kustomize k8s >/dev/null
+	@sh -n scripts/*.sh tests/integration.sh
+	@sh -n tests/kafka.sh
 
-# Запуск тестов
+# Запуск тестов сервисов
 test: lint
-	$(MAKE) -C ../arcee test
-	cd ../ironhide && go test ./...
-	$(MAKE) -C ../laserbeak test
-	npm --prefix ../soundwave run typecheck
-	npm --prefix ../soundwave run test:ci
+	$(MAKE) -C ../users test
+	cd ../entities && go test ./...
+	$(MAKE) -C ../tasks-it test
+	cd ../task-hunter && go test ./...
+	$(MAKE) -C ../api-gateway test
+	npm --prefix ../frontend run typecheck
+	npm --prefix ../frontend run test:ci
 
-# Запуск интеграционных тестов
-integration:
-	./tests/integration.sh
+# Запуск сквозного GraphQL-сценария на поднятом стеке
+integration: init
+	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/integration.sh
 
-# Build/load images and apply Kubernetes manifests
+# Сборка образов и применение Kubernetes-манифестов
 deploy-k8s:
-	./scripts/deploy-k8s.sh
+	@./scripts/deploy-k8s.sh
 
-# Render the Kubernetes resources
+# Рендер Kubernetes-ресурсов без применения
 render-k8s:
-	kubectl kustomize k8s
+	@kubectl kustomize k8s

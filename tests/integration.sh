@@ -4,13 +4,18 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
-if [ -f .env ]; then
+ENV_FILE="${INFRA_ENV_FILE:-./.env}"
+case "$ENV_FILE" in
+  /*|*/*) ;;
+  *) ENV_FILE="./$ENV_FILE" ;;
+esac
+if [ -f "$ENV_FILE" ]; then
   set -a
-  . ./.env
+  . "$ENV_FILE"
   set +a
 fi
 
-BASE_URL="${LASERBEAK_URL:-http://localhost:8081}"
+BASE_URL="${API_GATEWAY_URL:-http://localhost:8081}"
 SUPERUSER_EMAIL="${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmind.v}"
 SUPERUSER_PASSWORD="${BOOTSTRAP_SUPERUSER_PASSWORD:-zaqwsxcde}"
 
@@ -18,7 +23,7 @@ attempt=0
 until curl -fsS "${BASE_URL}/health" >/dev/null; do
   attempt=$((attempt + 1))
   if [ "$attempt" -ge 60 ]; then
-    echo "laserbeak did not become healthy" >&2
+    echo "api-gateway did not become healthy" >&2
     exit 1
   fi
   sleep 2
@@ -58,12 +63,14 @@ PY
 
 login_response="$(graphql 'mutation Login($input: LoginInput!) { login(input: $input) { token user { id email roles isAdmin } } }' "{\"input\":{\"email\":\"${email}\",\"password\":\"password\"}}")"
 
-LOGIN_RESPONSE="$login_response" python3 - <<'PY'
+student_token="$(LOGIN_RESPONSE="$login_response" python3 - <<'PY'
 import json, os
 payload = json.loads(os.environ["LOGIN_RESPONSE"])
 assert not payload.get("errors"), payload
 assert payload["data"]["login"]["token"], payload
+print(payload["data"]["login"]["token"])
 PY
+)"
 
 superuser_response="$(graphql 'mutation Login($input: LoginInput!) { login(input: $input) { token user { id email roles isAdmin isSuperuser } } }' "{\"input\":{\"email\":\"${SUPERUSER_EMAIL}\",\"password\":\"${SUPERUSER_PASSWORD}\"}}")"
 superuser_token="$(SUPERUSER_RESPONSE="$superuser_response" python3 - <<'PY'
@@ -159,4 +166,66 @@ assert edge["topicId"] == os.environ["PRACTICE_ID"], payload
 assert edge["prerequisiteTopicId"] == os.environ["INTRO_ID"], payload
 PY
 
-echo "integration full auth/catalog flow: OK"
+task_response="$(graphql 'mutation CreateITTask($input: ITTaskInput!) { createITTask(input: $input) { id status taskVersionId versionNumber options { id text isCorrect } } }' "{\"input\":{\"topicId\":\"${practice_id}\",\"title\":\"Integration HTTP test\",\"statement\":\"Which protocol is used for web pages?\",\"taskType\":\"single_choice\",\"difficulty\":\"easy\",\"options\":[{\"text\":\"HTTP\",\"isCorrect\":true},{\"text\":\"SMTP\",\"isCorrect\":false}]}}" "$admin_token")"
+task_values="$(TASK_RESPONSE="$task_response" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["TASK_RESPONSE"])
+assert not payload.get("errors"), payload
+task = payload["data"]["createITTask"]
+assert task["status"] == "draft", payload
+assert task["versionNumber"] == 1, payload
+correct = [option["id"] for option in task["options"] if option["isCorrect"]]
+assert len(correct) == 1, payload
+print(task["id"], task["taskVersionId"], correct[0])
+PY
+)"
+set -- $task_values
+task_id="$1"
+task_version_id="$2"
+correct_option_id="$3"
+
+publish_response="$(graphql 'mutation PublishITTask($id: ID!) { changeITTaskStatus(id: $id, status: published) { id status taskVersionId } }' "{\"id\":\"${task_id}\"}" "$admin_token")"
+PUBLISH_RESPONSE="$publish_response" TASK_ID="$task_id" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["PUBLISH_RESPONSE"])
+assert not payload.get("errors"), payload
+task = payload["data"]["changeITTaskStatus"]
+assert task["id"] == os.environ["TASK_ID"], payload
+assert task["status"] == "published", payload
+PY
+
+public_task_response="$(graphql 'query ITTask($id: ID!) { itTask(id: $id) { id status options { id text isCorrect } } }' "{\"id\":\"${task_id}\"}" "$student_token")"
+PUBLIC_TASK_RESPONSE="$public_task_response" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["PUBLIC_TASK_RESPONSE"])
+assert not payload.get("errors"), payload
+task = payload["data"]["itTask"]
+assert task["status"] == "published", payload
+assert all(option["isCorrect"] is None for option in task["options"]), payload
+PY
+
+idempotency_key="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+submission_response="$(graphql 'mutation SubmitITTask($taskId: ID!, $input: ITSubmissionInput!) { submitITTaskAnswer(taskId: $taskId, input: $input) { id taskId taskVersionId correct verdict taskUpdated } }' "{\"taskId\":\"${task_id}\",\"input\":{\"taskVersionId\":\"${task_version_id}\",\"idempotencyKey\":\"${idempotency_key}\",\"selectedOptionIds\":[\"${correct_option_id}\"]}}" "$student_token")"
+submission_id="$(SUBMISSION_RESPONSE="$submission_response" TASK_ID="$task_id" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["SUBMISSION_RESPONSE"])
+assert not payload.get("errors"), payload
+submission = payload["data"]["submitITTaskAnswer"]
+assert submission["taskId"] == os.environ["TASK_ID"], payload
+assert submission["correct"], payload
+assert submission["verdict"] == "accepted", payload
+assert not submission["taskUpdated"], payload
+print(submission["id"])
+PY
+)"
+
+history_response="$(graphql 'query ITSubmissionHistory($taskId: ID!) { myITSubmissions(taskId: $taskId) { items { id taskId correct verdict } } }' "{\"taskId\":\"${task_id}\"}" "$student_token")"
+HISTORY_RESPONSE="$history_response" SUBMISSION_ID="$submission_id" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["HISTORY_RESPONSE"])
+assert not payload.get("errors"), payload
+items = payload["data"]["myITSubmissions"]["items"]
+assert any(item["id"] == os.environ["SUBMISSION_ID"] and item["correct"] for item in items), payload
+PY
+
+echo "integration auth/catalog/tasks-it flow: OK"
