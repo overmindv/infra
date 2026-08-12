@@ -4,6 +4,12 @@ metadata:
   name: overmindv-config
   namespace: overmindv
 data:
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  KAFKA_CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
+  KAFKA_REQUESTS_TOPIC: "code-execution.requests.v1"
+  KAFKA_RESULTS_TOPIC: "code-execution.results.v1"
+  KAFKA_TOPIC_PARTITIONS: "3"
+  KAFKA_RETENTION_MS: "604800000"
   USERS_PORT: "8080"
   USERS_GRAPHQL_URL: "http://users:8080/query"
   USERS_HEALTH_URL: "http://users:8080/health"

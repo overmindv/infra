@@ -1,6 +1,6 @@
 # Infra
 
-Локальное окружение Overmindv запускает `users`, `entities`, `tasks-it`, `task-hunter`, `api-gateway`, `frontend` и отдельный PostgreSQL для каждого сервиса-владельца данных.
+Локальное окружение Overmindv запускает `users`, `entities`, `tasks-it`, `task-hunter`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных.
 
 ## Быстрый запуск
 
@@ -15,7 +15,8 @@ make up
 - создаст `.env`, если его ещё нет;
 - сгенерирует пароли PostgreSQL, JWT secret и внутренние service tokens;
 - соберёт образы;
-- запустит PostgreSQL и применит миграции;
+- запустит PostgreSQL, применит миграции и поднимет Kafka в KRaft-режиме;
+- создаст Kafka topic'и запросов на выполнение кода и результатов;
 - поднимет backend, gateway и frontend;
 - дождётся healthchecks;
 - покажет адреса и локальный пароль администратора.
@@ -26,10 +27,11 @@ make up
 
 - frontend — `http://localhost:3000`;
 - GraphQL — `http://localhost:8081/graphql`;
+- Kafka с хост-машины — `localhost:29092`;
 - admin email — `admin@overmindv.local`;
 - сгенерированный admin password — в выводе `make up` или `make credentials`.
 
-Если стандартный порт занят, измените только нужное значение в `.env`: `FRONTEND_PORT`, `API_GATEWAY_PORT`, `USERS_POSTGRES_PORT`, `ENTITIES_POSTGRES_PORT` или `TASKS_IT_POSTGRES_PORT`.
+Если стандартный порт занят, измените только нужное значение в `.env`: `FRONTEND_PORT`, `API_GATEWAY_PORT`, `KAFKA_PORT`, `USERS_POSTGRES_PORT`, `ENTITIES_POSTGRES_PORT` или `TASKS_IT_POSTGRES_PORT`.
 
 ## Основные команды
 
@@ -37,6 +39,7 @@ make up
 make up           # собрать и запустить всё
 make status       # показать состояние контейнеров
 make logs         # показать общие логи
+make kafka-check  # проверить topic'и и полный producer/consumer flow
 make credentials  # показать локальный URL и admin credentials
 make down         # остановить и сохранить базы
 make clean        # остановить и удалить локальные базы/volumes
@@ -44,6 +47,27 @@ make integration  # проверить полный GraphQL-сценарий
 ```
 
 `tasks-it` и `task-hunter` доступны только во внутренней Docker-сети. Frontend обращается только к `api-gateway`.
+
+## Kafka для выполнения кода
+
+Используется официальный закреплённый образ `apache/kafka:4.3.1` в KRaft-режиме, поэтому ZooKeeper не нужен. Topic'и создаются автоматически и идемпотентно после готовности брокера:
+
+- `code-execution.requests.v1` — `tasks-it` публикует запросы, `sandbox` читает их;
+- `code-execution.results.v1` — `sandbox` публикует результаты, `tasks-it` читает их.
+
+Оба topic'а имеют по три partition, replication factor `1` для одноброкерного окружения и retention семь суток. Автоматическое создание произвольных topic'ов отключено, чтобы опечатка в имени не создавала новый канал данных.
+
+Bootstrap servers:
+
+- из контейнеров Docker Compose — `kafka:9092`;
+- с хост-машины — `localhost:29092` или порт из `KAFKA_PORT`;
+- внутри namespace Kubernetes — `kafka:9092`.
+
+Если команда `sandbox` запускает свой контейнер отдельным Compose-проектом, его нужно подключить к существующей external network `overmindv_default` и использовать `kafka:9092`. Публикация host-порта для такого подключения не нужна.
+
+Для будущей интеграции используйте UUID решения как Kafka message key: так запрос и повторные события одного решения сохраняют порядок в одной partition. Рекомендуемые consumer groups: `sandbox-code-execution-v1` для запросов и `tasks-it-code-results-v1` для результатов. Имена topic'ов и параметры хранения задаются через `KAFKA_REQUESTS_TOPIC`, `KAFKA_RESULTS_TOPIC`, `KAFKA_TOPIC_PARTITIONS` и `KAFKA_RETENTION_MS`.
+
+Локальные listeners используют `PLAINTEXT` и предназначены только для разработки. В Kubernetes Kafka не публикуется наружу, а NetworkPolicy разрешает входящие соединения только от pod'ов `tasks-it`, `sandbox`, самой Kafka и Job создания topic'ов. Сам сервис `sandbox` в этом репозитории не разворачивается и не изменяется.
 
 ## Опциональный Telegram
 
@@ -96,6 +120,7 @@ Session хранится в `infra/.local/task-hunter/telegram.session`, име�
 
 ```bash
 make lint
+make kafka-check
 make test
 make integration
 ```
@@ -121,4 +146,4 @@ export BOOTSTRAP_SUPERUSER_PASSWORD='...'
 make deploy-k8s
 ```
 
-Секреты создаются через `kubectl` и не хранятся в манифестах. `tasks-it` и `task-hunter` не публикуются через Ingress.
+Секреты создаются через `kubectl` и не хранятся в манифестах. Kafka разворачивается как однорепликовый StatefulSet с PVC `5Gi`; Job `kafka-topics` ждёт готовности брокера и создаёт оба topic'а. Kafka, `tasks-it` и `task-hunter` не публикуются через Ingress.

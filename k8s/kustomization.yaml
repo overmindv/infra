@@ -3,6 +3,8 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - configmap.yaml
+  - kafka.yaml
+  - kafka-topics-job.yaml
   - users-postgres.yaml
   - entities-postgres.yaml
   - tasks-it-postgres.yaml

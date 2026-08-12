@@ -61,6 +61,8 @@ kubectl -n "$NAMESPACE" create secret generic overmindv-secrets \
   --from-literal=BOOTSTRAP_SUPERUSER_PASSWORD="$BOOTSTRAP_SUPERUSER_PASSWORD" \
   --dry-run=client -o yaml | kubectl apply -f -
 
+# Job создаёт topic'и идемпотентно; пересоздание гарантирует его запуск после каждого deploy.
+kubectl -n "$NAMESPACE" delete job kafka-topics --ignore-not-found
 kubectl apply -k k8s
 kubectl -n "$NAMESPACE" set image deployment/users users="${REGISTRY}/users:${TAG}" users-migrate="${REGISTRY}/users:${TAG}"
 kubectl -n "$NAMESPACE" set image deployment/entities entities="${REGISTRY}/entities:${TAG}" entities-migrate="${REGISTRY}/entities:${TAG}"
@@ -68,6 +70,8 @@ kubectl -n "$NAMESPACE" set image deployment/tasks-it tasks-it="${REGISTRY}/task
 kubectl -n "$NAMESPACE" set image deployment/task-hunter task-hunter="${REGISTRY}/task-hunter:${TAG}" task-hunter-migrate="${REGISTRY}/task-hunter:${TAG}"
 kubectl -n "$NAMESPACE" set image deployment/api-gateway api-gateway="${REGISTRY}/api-gateway:${TAG}"
 kubectl -n "$NAMESPACE" set image deployment/frontend frontend="${REGISTRY}/frontend:${TAG}"
+
+kubectl -n "$NAMESPACE" rollout status statefulset/kafka --timeout=180s
 
 for deployment in \
   users-postgres \
@@ -82,3 +86,5 @@ for deployment in \
   frontend; do
   kubectl -n "$NAMESPACE" rollout status "deployment/$deployment" --timeout=180s
 done
+
+kubectl -n "$NAMESPACE" wait --for=condition=complete job/kafka-topics --timeout=180s
