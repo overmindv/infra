@@ -2,7 +2,7 @@ ENV_FILE ?= .env
 COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
 .DEFAULT_GOAL := help
 
-.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs lint test integration deploy-k8s render-k8s
+.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration deploy-k8s render-k8s
 
 # Краткая справка по локальному запуску
 help:
@@ -11,6 +11,7 @@ help:
 	@echo "make clean          Остановить стек и удалить локальные базы"
 	@echo "make status         Показать состояние контейнеров"
 	@echo "make logs           Показать логи"
+	@echo "make kafka-check    Проверить создание topic'ов и обмен сообщениями"
 	@echo "make credentials    Показать URL и локального администратора"
 	@echo "make telegram-login Создать опциональную Telegram session"
 
@@ -57,16 +58,22 @@ push:
 
 # Логи основных сервисов
 logs: init
-	@$(COMPOSE) logs -f users entities tasks-it task-hunter api-gateway frontend
+	@$(COMPOSE) logs -f kafka users entities tasks-it task-hunter api-gateway frontend
 
 # Логи сервисов, обрабатывающих пользовательские запросы
 request-logs: init
 	@$(COMPOSE) logs -f api-gateway entities tasks-it task-hunter
 
+# Проверка Kafka и полного цикла producer/consumer на временном topic'е
+kafka-check: init
+	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/kafka.sh
+
 # Быстрая проверка инфраструктурных файлов
 lint:
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
+	@kubectl kustomize k8s >/dev/null
 	@sh -n scripts/*.sh tests/integration.sh
+	@sh -n tests/kafka.sh
 
 # Запуск тестов сервисов
 test: lint
