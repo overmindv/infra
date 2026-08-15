@@ -190,8 +190,17 @@ services:
       READ_TIMEOUT: ${TASKS_READ_TIMEOUT:-10s}
       WRITE_TIMEOUT: ${TASKS_WRITE_TIMEOUT:-20s}
       TASK_HUNTER_INGEST_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
+      KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
+      KAFKA_RESULTS_CONSUMER_GROUP: ${KAFKA_RESULTS_CONSUMER_GROUP:-tasks-code-results-v1}
+      KAFKA_OUTBOX_POLL_INTERVAL: ${KAFKA_OUTBOX_POLL_INTERVAL:-500ms}
+      CODE_EXECUTION_TIME_LIMIT: ${CODE_EXECUTION_TIME_LIMIT:-1s}
+      CODE_EXECUTION_MEMORY_LIMIT_BYTES: ${CODE_EXECUTION_MEMORY_LIMIT_BYTES:-67108864}
     depends_on:
       tasks-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
