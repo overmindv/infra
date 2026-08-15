@@ -228,4 +228,4 @@ items = payload["data"]["myITSubmissions"]["items"]
 assert any(item["id"] == os.environ["SUBMISSION_ID"] and item["correct"] for item in items), payload
 PY
 
-echo "integration auth/catalog/tasks-it flow: OK"
+echo "integration auth/catalog/tasks flow: OK"

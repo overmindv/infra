@@ -2,7 +2,7 @@ ENV_FILE ?= .env
 COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
 .DEFAULT_GOAL := help
 
-.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration deploy-k8s render-k8s
+.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration
 
 # Краткая справка по локальному запуску
 help:
@@ -58,11 +58,11 @@ push:
 
 # Логи основных сервисов
 logs: init
-	@$(COMPOSE) logs -f kafka users entities tasks-it task-hunter api-gateway frontend
+	@$(COMPOSE) logs -f kafka users entities tasks task-hunter api-gateway frontend
 
 # Логи сервисов, обрабатывающих пользовательские запросы
 request-logs: init
-	@$(COMPOSE) logs -f api-gateway entities tasks-it task-hunter
+	@$(COMPOSE) logs -f api-gateway entities tasks task-hunter
 
 # Проверка Kafka и полного цикла producer/consumer на временном topic'е
 kafka-check: init
@@ -71,7 +71,6 @@ kafka-check: init
 # Быстрая проверка инфраструктурных файлов
 lint:
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
-	@kubectl kustomize k8s >/dev/null
 	@sh -n scripts/*.sh tests/integration.sh
 	@sh -n tests/kafka.sh
 
@@ -79,7 +78,7 @@ lint:
 test: lint
 	$(MAKE) -C ../users test
 	cd ../entities && go test ./...
-	$(MAKE) -C ../tasks-it test
+	$(MAKE) -C ../tasks test
 	cd ../task-hunter && go test ./...
 	$(MAKE) -C ../api-gateway test
 	npm --prefix ../frontend run typecheck
@@ -88,11 +87,3 @@ test: lint
 # Запуск сквозного GraphQL-сценария на поднятом стеке
 integration: init
 	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/integration.sh
-
-# Сборка образов и применение Kubernetes-манифестов
-deploy-k8s:
-	@./scripts/deploy-k8s.sh
-
-# Рендер Kubernetes-ресурсов без применения
-render-k8s:
-	@kubectl kustomize k8s
