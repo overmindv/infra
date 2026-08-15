@@ -9,15 +9,25 @@ case "$ENV_FILE" in
   /*|*/*) ;;
   *) ENV_FILE="./$ENV_FILE" ;;
 esac
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  . "$ENV_FILE"
-  set +a
-fi
 
-BASE_URL="${API_GATEWAY_URL:-http://localhost:8081}"
-SUPERUSER_EMAIL="${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmind.v}"
-SUPERUSER_PASSWORD="${BOOTSTRAP_SUPERUSER_PASSWORD:-zaqwsxcde}"
+# env_value читает отдельную настройку без выполнения содержимого env-файла.
+env_value() {
+  key="$1"
+  fallback="$2"
+  value=""
+  if [ -f "$ENV_FILE" ]; then
+    value="$(awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' "$ENV_FILE")"
+  fi
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
+BASE_URL="$(env_value API_GATEWAY_URL http://localhost:8081)"
+SUPERUSER_EMAIL="$(env_value BOOTSTRAP_SUPERUSER_EMAIL admin@overmind.v)"
+SUPERUSER_PASSWORD="$(env_value BOOTSTRAP_SUPERUSER_PASSWORD zaqwsxcde)"
 
 attempt=0
 until curl -fsS "${BASE_URL}/health" >/dev/null; do
@@ -228,4 +238,64 @@ items = payload["data"]["myITSubmissions"]["items"]
 assert any(item["id"] == os.environ["SUBMISSION_ID"] and item["correct"] for item in items), payload
 PY
 
-echo "integration auth/catalog/tasks flow: OK"
+programming_response="$(graphql 'mutation CreateITTask($input: ITTaskInput!) { createITTask(input: $input) { id status taskVersionId taskType } }' "{\"input\":{\"topicId\":\"${practice_id}\",\"title\":\"Integration echo\",\"statement\":\"Read one line and print it.\",\"taskType\":\"programming\",\"difficulty\":\"easy\",\"options\":[],\"tags\":[\"stdin\"],\"examples\":[{\"input\":\"hello\",\"output\":\"hello\",\"explanation\":\"Echo input\"}],\"constraints\":[\"Input is one line\"]}}" "$admin_token")"
+programming_values="$(PROGRAMMING_RESPONSE="$programming_response" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["PROGRAMMING_RESPONSE"])
+assert not payload.get("errors"), payload
+task = payload["data"]["createITTask"]
+assert task["status"] == "draft", payload
+assert task["taskType"] == "programming", payload
+print(task["id"], task["taskVersionId"])
+PY
+)"
+set -- $programming_values
+programming_task_id="$1"
+programming_version_id="$2"
+
+programming_publish_response="$(graphql 'mutation PublishITTask($id: ID!) { changeITTaskStatus(id: $id, status: published) { id status } }' "{\"id\":\"${programming_task_id}\"}" "$admin_token")"
+PROGRAMMING_PUBLISH_RESPONSE="$programming_publish_response" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["PROGRAMMING_PUBLISH_RESPONSE"])
+assert not payload.get("errors"), payload
+assert payload["data"]["changeITTaskStatus"]["status"] == "published", payload
+PY
+
+code_idempotency_key="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+source_file="$(mktemp)"
+printf '%s\n' 'value = input()' 'print(value)' >"$source_file"
+operations="$(PROGRAMMING_TASK_ID="$programming_task_id" PROGRAMMING_VERSION_ID="$programming_version_id" IDEMPOTENCY_KEY="$code_idempotency_key" python3 - <<'PY'
+import json, os
+print(json.dumps({
+    "query": "mutation SubmitITTaskCode($taskId: ID!, $input: ITCodeSubmissionInput!) { submitITTaskCode(taskId: $taskId, input: $input) { id taskId taskVersionId status executionId sourceFileName } }",
+    "variables": {
+        "taskId": os.environ["PROGRAMMING_TASK_ID"],
+        "input": {
+            "taskVersionId": os.environ["PROGRAMMING_VERSION_ID"],
+            "idempotencyKey": os.environ["IDEMPOTENCY_KEY"],
+            "language": "python",
+            "file": None,
+        },
+    },
+}))
+PY
+)"
+code_submission_response="$(curl -fsS "${BASE_URL}/graphql" \
+  -H "Authorization: Bearer ${student_token}" \
+  -F "operations=${operations}" \
+  -F 'map={"0":["variables.input.file"]}' \
+  -F "0=@${source_file};type=text/x-python;filename=solution.py")"
+rm -f "$source_file"
+
+CODE_SUBMISSION_RESPONSE="$code_submission_response" PROGRAMMING_TASK_ID="$programming_task_id" python3 - <<'PY'
+import json, os
+payload = json.loads(os.environ["CODE_SUBMISSION_RESPONSE"])
+assert not payload.get("errors"), payload
+submission = payload["data"]["submitITTaskCode"]
+assert submission["taskId"] == os.environ["PROGRAMMING_TASK_ID"], payload
+assert submission["status"] == "queued", payload
+assert submission["executionId"], payload
+assert submission["sourceFileName"] == "solution.py", payload
+PY
+
+echo "integration auth/catalog/tasks/programming submission flow: OK"
