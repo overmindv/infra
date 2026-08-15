@@ -1,4 +1,4 @@
-name: Ratchet Deploy
+name: Infra Deploy
 
 on:
   workflow_dispatch:
@@ -34,16 +34,16 @@ jobs:
         run: |
           kubectl apply -f k8s/namespace.yaml
           kubectl -n overmindv create secret generic overmindv-secrets \
-            --from-literal=POSTGRES_DB=arcee \
+            --from-literal=POSTGRES_DB=users \
             --from-literal=POSTGRES_USER=postgres \
             --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-            --from-literal=DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/arcee?sslmode=disable" \
+            --from-literal=DATABASE_URL="postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/users?sslmode=disable" \
             --from-literal=JWT_SECRET="$JWT_SECRET" \
             --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -k k8s
-          kubectl -n overmindv set image deployment/arcee arcee="${IMAGE_REGISTRY}/arcee:${IMAGE_TAG}" arcee-migrate="${IMAGE_REGISTRY}/arcee:${IMAGE_TAG}"
-          kubectl -n overmindv set image deployment/laserbeak laserbeak="${IMAGE_REGISTRY}/laserbeak:${IMAGE_TAG}"
-          kubectl -n overmindv set image deployment/soundwave soundwave="${IMAGE_REGISTRY}/soundwave:${IMAGE_TAG}"
-          kubectl -n overmindv rollout status deployment/arcee --timeout=180s
-          kubectl -n overmindv rollout status deployment/laserbeak --timeout=180s
-          kubectl -n overmindv rollout status deployment/soundwave --timeout=180s
+          kubectl -n overmindv set image deployment/users users="${IMAGE_REGISTRY}/users:${IMAGE_TAG}" users-migrate="${IMAGE_REGISTRY}/users:${IMAGE_TAG}"
+          kubectl -n overmindv set image deployment/api-gateway api-gateway="${IMAGE_REGISTRY}/api-gateway:${IMAGE_TAG}"
+          kubectl -n overmindv set image deployment/frontend frontend="${IMAGE_REGISTRY}/frontend:${IMAGE_TAG}"
+          kubectl -n overmindv rollout status deployment/users --timeout=180s
+          kubectl -n overmindv rollout status deployment/api-gateway --timeout=180s
+          kubectl -n overmindv rollout status deployment/frontend --timeout=180s

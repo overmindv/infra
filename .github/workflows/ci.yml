@@ -1,4 +1,4 @@
-name: Ratchet CI
+name: Infra CI
 
 on:
   pull_request:

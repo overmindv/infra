@@ -2,3 +2,5 @@
 .local/
 logs/
 .code-review-graph/
+.codegraph/
+.claude/
