@@ -60,14 +60,13 @@ make integration  # проверить полный GraphQL-сценарий
 Bootstrap servers:
 
 - из контейнеров Docker Compose — `kafka:9092`;
-- с хост-машины — `localhost:29092` или порт из `KAFKA_PORT`;
-- внутри namespace Kubernetes — `kafka:9092`.
+- с хост-машины — `localhost:29092` или порт из `KAFKA_PORT`.
 
 Если команда `sandbox` запускает свой контейнер отдельным Compose-проектом, его нужно подключить к существующей external network `overmindv_default` и использовать `kafka:9092`. Публикация host-порта для такого подключения не нужна.
 
 Для будущей интеграции используйте UUID решения как Kafka message key: так запрос и повторные события одного решения сохраняют порядок в одной partition. Рекомендуемые consumer groups: `sandbox-code-execution-v1` для запросов и `tasks-code-results-v1` для результатов. Имена topic'ов и параметры хранения задаются через `KAFKA_REQUESTS_TOPIC`, `KAFKA_RESULTS_TOPIC`, `KAFKA_TOPIC_PARTITIONS` и `KAFKA_RETENTION_MS`.
 
-Локальные listeners используют `PLAINTEXT` и предназначены только для разработки. В Kubernetes Kafka не публикуется наружу, а NetworkPolicy разрешает входящие соединения только от pod'ов `tasks`, `sandbox`, самой Kafka и Job создания topic'ов. Сам сервис `sandbox` в этом репозитории не разворачивается и не изменяется.
+Локальные listeners используют `PLAINTEXT` и предназначены только для разработки. Сам сервис `sandbox` в этом репозитории не разворачивается и не изменяется.
 
 ## Опциональный Telegram
 
@@ -125,25 +124,4 @@ make test
 make integration
 ```
 
-Интеграционный сценарий проверяет регистрацию, роли, каталог, создание и публикацию IT-теста, решение и историю пользователя.
-
-## Kubernetes
-
-Kubernetes-развёртывание остаётся явной production-операцией и требует секреты окружения, включая Telegram credentials:
-
-```bash
-export USERS_POSTGRES_PASSWORD='...'
-export ENTITIES_POSTGRES_PASSWORD='...'
-export TASKS_POSTGRES_PASSWORD='...'
-export TASK_HUNTER_POSTGRES_PASSWORD='...'
-export TASK_HUNTER_INGEST_TOKEN='...'
-export TASK_HUNTER_GATEWAY_TOKEN='...'
-export TASK_HUNTER_TELEGRAM_API_ID='...'
-export TASK_HUNTER_TELEGRAM_API_HASH='...'
-export JWT_SECRET='...'
-export BOOTSTRAP_SUPERUSER_EMAIL='admin@example.com'
-export BOOTSTRAP_SUPERUSER_PASSWORD='...'
-make deploy-k8s
-```
-
-Секреты создаются через `kubectl` и не хранятся в манифестах. Kafka разворачивается как однорепликовый StatefulSet с PVC `5Gi`; Job `kafka-topics` ждёт готовности брокера и создаёт оба topic'а. Kafka, `tasks` и `task-hunter` не публикуются через Ingress.
+Интеграционный сценарий проверяет регистрацию, роли, каталог, создание и публикацию choice- и programming-задач, сохранение choice-ответа и загрузку файла programming-решения.
