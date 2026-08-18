@@ -27,6 +27,8 @@ make up
 
 - frontend — `http://localhost:3000`;
 - GraphQL — `http://localhost:8081/graphql`;
+- Media API — `http://localhost:8085` (только для диагностики; frontend использует gateway);
+- MinIO API/Console — `http://localhost:9000` / `http://localhost:9001`;
 - Kafka с хост-машины — `localhost:29092`;
 - admin email — `admin@overmindv.local`;
 - сгенерированный admin password — в выводе `make up` или `make credentials`.
