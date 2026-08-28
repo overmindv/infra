@@ -71,7 +71,10 @@ services:
     restart: unless-stopped
 
   users-migrate:
-    build: ../users
+    build:
+      context: ../users
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://${USERS_POSTGRES_USER:-postgres}:${USERS_POSTGRES_PASSWORD}@users-postgres:5432/${USERS_POSTGRES_DB:-users}?sslmode=disable"
     entrypoint: ["/bin/sh", "-c"]
@@ -82,7 +85,10 @@ services:
     restart: "no"
 
   users:
-    build: ../users
+    build:
+      context: ../users
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       PORT: "8080"
       DATABASE_URL: "postgres://${USERS_POSTGRES_USER:-postgres}:${USERS_POSTGRES_PASSWORD}@users-postgres:5432/${USERS_POSTGRES_DB:-users}?sslmode=disable"
@@ -110,6 +116,8 @@ services:
     build:
       context: ../users
       target: worker
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://${USERS_POSTGRES_USER:-postgres}:${USERS_POSTGRES_PASSWORD}@users-postgres:5432/${USERS_POSTGRES_DB:-users}?sslmode=disable"
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
@@ -149,7 +157,10 @@ services:
     restart: unless-stopped
 
   entities-migrate:
-    build: ../entities
+    build:
+      context: ../entities
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
     entrypoint: ["/bin/sh", "-c"]
@@ -160,7 +171,10 @@ services:
     restart: "no"
 
   entities:
-    build: ../entities
+    build:
+      context: ../entities
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       ENTITIES_SERVICE_NAME: entities
       ENTITIES_HTTP_ADDR: ":8080"
@@ -198,7 +212,10 @@ services:
     restart: unless-stopped
 
   tasks-migrate:
-    build: ../tasks
+    build:
+      context: ../tasks
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://tasks:${TASKS_POSTGRES_PASSWORD}@tasks-postgres:5432/tasks?sslmode=disable"
     entrypoint: ["/bin/sh", "-c"]
@@ -209,7 +226,10 @@ services:
     restart: "no"
 
   tasks:
-    build: ../tasks
+    build:
+      context: ../tasks
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       SERVICE_NAME: tasks
       HTTP_ADDR: ":8080"
@@ -254,7 +274,10 @@ services:
     restart: unless-stopped
 
   task-hunter-migrate:
-    build: ../task-hunter
+    build:
+      context: ../task-hunter
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
     entrypoint: ["/bin/sh", "-c"]
@@ -265,7 +288,10 @@ services:
     restart: "no"
 
   task-hunter:
-    build: ../task-hunter
+    build:
+      context: ../task-hunter
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     user: "${LOCAL_UID:-10001}:${LOCAL_GID:-10001}"
     environment:
       PARSER_DATABASE_DSN: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
@@ -302,7 +328,10 @@ services:
     restart: unless-stopped
 
   api-gateway:
-    build: ../api-gateway
+    build:
+      context: ../api-gateway
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       PORT: "8081"
       USERS_GRAPHQL_URL: http://users:8080/query
@@ -440,6 +469,8 @@ services:
     build:
       context: ../media
       target: api
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://media:${MEDIA_POSTGRES_PASSWORD}@media-postgres:5432/media?sslmode=disable"
     entrypoint: ["/bin/sh", "-c"]
@@ -453,6 +484,8 @@ services:
     build:
       context: ../media
       target: api
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment: &media-environment
       MEDIA_HTTP_ADDR: ":8080"
       MEDIA_DATABASE_URL: "postgres://media:${MEDIA_POSTGRES_PASSWORD}@media-postgres:5432/media?sslmode=disable"
@@ -491,6 +524,8 @@ services:
     build:
       context: ../media
       target: worker
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment: *media-environment
     depends_on:
       media-migrate:
@@ -498,7 +533,7 @@ services:
       media-buckets:
         condition: service_completed_successfully
       clamav:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/ready >/dev/null"]

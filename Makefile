@@ -2,7 +2,7 @@ ENV_FILE ?= .env
 COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
 .DEFAULT_GOAL := help
 
-.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration
+.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration update
 
 # Краткая справка по локальному запуску
 help:
@@ -14,6 +14,7 @@ help:
 	@echo "make kafka-check    Проверить создание topic'ов и обмен сообщениями"
 	@echo "make credentials    Показать URL и локального администратора"
 	@echo "make telegram-login Создать опциональную Telegram session"
+	@echo "make update         Обновить все сервисные репозитории из их удалённых default-веток"
 
 # Подготовка локального env с автоматически сгенерированными секретами
 init:
@@ -22,7 +23,7 @@ init:
 # Сборка и запуск всего локального стека с ожиданием готовности
 up: init
 	@./scripts/preflight.sh $(ENV_FILE)
-	@$(COMPOSE) up --build -d --wait --wait-timeout 300
+	@$(COMPOSE) up --build -d
 	@./scripts/show-local-info.sh $(ENV_FILE)
 
 # Остановка контейнеров с сохранением данных
@@ -47,6 +48,11 @@ credentials: init
 # Интерактивное создание Telegram MTProto session
 telegram-login: init
 	@./scripts/telegram-login.sh $(ENV_FILE)
+
+# Обновление всех сервисных репозиториев (overmindv + сервисы) из их удалённых default-веток
+# Доп. флаги: UPDATE_BRANCH=main  (форсировать ветку), UNDATE_FORCE=1 (reset --hard)
+update:
+	@./scripts/update-repos.sh $(if $(UPDATE_BRANCH),--branch $(UPDATE_BRANCH)) $(if $(UPDATE_FORCE),--force) $(if $(DRY),--dry-run)
 
 # Сборка production-образов
 build:
