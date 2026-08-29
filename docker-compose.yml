@@ -194,8 +194,7 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://tasks:${TASKS_POSTGRES_PASSWORD}@tasks-postgres:5432/tasks?sslmode=disable"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    entrypoint: ["tasks", "migrate", "--dir", "/app/migrations", "up"]
     depends_on:
       tasks-postgres:
         condition: service_healthy
