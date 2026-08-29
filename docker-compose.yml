@@ -138,8 +138,7 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    entrypoint: ["entities", "migrate", "--dir", "/app/migrations", "up"]
     depends_on:
       entities-postgres:
         condition: service_healthy
@@ -151,11 +150,11 @@ services:
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
-      ENTITIES_SERVICE_NAME: entities
-      ENTITIES_HTTP_ADDR: ":8080"
-      ENTITIES_DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
-      ENTITIES_ENV: local
-      ENTITIES_REQUEST_LOG_PATH: ""
+      SERVICE_NAME: entities
+      HTTP_ADDR: ":8080"
+      ENV: local
+      LOG_LEVEL: info
+      DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
     depends_on:
       entities-migrate:
         condition: service_completed_successfully
