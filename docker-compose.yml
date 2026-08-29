@@ -43,9 +43,11 @@ services:
         set -eu
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_REQUESTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_RESULTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
+      KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
       KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
     depends_on:
@@ -364,11 +366,65 @@ services:
       retries: 20
     restart: unless-stopped
 
+  content-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: content
+      POSTGRES_USER: content
+      POSTGRES_PASSWORD: ${CONTENT_POSTGRES_PASSWORD:?set CONTENT_POSTGRES_PASSWORD in .env}
+    ports:
+      - "${CONTENT_POSTGRES_PORT:-5436}:5432"
+    volumes:
+      - content-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U content -d content"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  content-migrate:
+    build:
+      context: ../content
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      DATABASE_URL: "postgres://content:${CONTENT_POSTGRES_PASSWORD}@content-postgres:5432/content?sslmode=disable"
+    entrypoint: ["content", "migrate", "--dir", "/app/migrations", "up"]
+    depends_on:
+      content-postgres:
+        condition: service_healthy
+    restart: "no"
+
   content:
-    image: alpine:3.22
-    profiles: ["future"]
-    command: ["sleep", "infinity"]
-    healthcheck: { test: ["CMD", "true"] }
+    build:
+      context: ../content
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      SERVICE_NAME: content
+      HTTP_ADDR: ":8080"
+      ENV: local
+      LOG_LEVEL: info
+      DATABASE_URL: "postgres://content:${CONTENT_POSTGRES_PASSWORD}@content-postgres:5432/content?sslmode=disable"
+      GRPC_ADDR: ":9090"
+      KAFKA_ENABLED: ${CONTENT_KAFKA_ENABLED:-true}
+      KAFKA_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      content-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
+        condition: service_completed_successfully
+    ports:
+      - "${CONTENT_GRPC_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
 
   media-postgres:
     image: postgres:17-alpine
@@ -524,6 +580,7 @@ volumes:
   entities-postgres:
   tasks-postgres:
   task-hunter-postgres:
+  content-postgres:
   media-postgres:
   minio-data:
   clamav-data:
