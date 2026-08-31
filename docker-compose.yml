@@ -255,8 +255,7 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    entrypoint: ["task-hunter", "migrate", "--dir", "/app/migrations", "up"]
     depends_on:
       task-hunter-postgres:
         condition: service_healthy
@@ -269,8 +268,10 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     user: "${LOCAL_UID:-10001}:${LOCAL_GID:-10001}"
     environment:
-      PARSER_DATABASE_DSN: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
-      PARSER_HTTP_ADDRESS: ":8080"
+      SERVICE_NAME: task-hunter
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: "postgres://task_hunter:${TASK_HUNTER_POSTGRES_PASSWORD}@task-hunter-postgres:5432/task_hunter?sslmode=disable"
+      ENV: local
       PARSER_SCHEDULE_COLLECTCRON: "${TASK_HUNTER_CRON:-0 */6 * * *}"
       PARSER_TASKS_URL: http://tasks:8080
       PARSER_TASKS_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
