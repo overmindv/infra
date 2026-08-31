@@ -502,13 +502,11 @@ services:
   media-migrate:
     build:
       context: ../media
-      target: api
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       DATABASE_URL: "postgres://media:${MEDIA_POSTGRES_PASSWORD}@media-postgres:5432/media?sslmode=disable"
-    entrypoint: ["/bin/sh", "-c"]
-    command: ["goose -dir /app/migrations postgres \"$$DATABASE_URL\" up"]
+    entrypoint: ["media", "migrate", "--dir", "/app/migrations", "up"]
     depends_on:
       media-postgres:
         condition: service_healthy
@@ -517,12 +515,13 @@ services:
   media:
     build:
       context: ../media
-      target: api
       args:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    environment: &media-environment
-      MEDIA_HTTP_ADDR: ":8080"
-      MEDIA_DATABASE_URL: "postgres://media:${MEDIA_POSTGRES_PASSWORD}@media-postgres:5432/media?sslmode=disable"
+    environment:
+      SERVICE_NAME: media
+      HTTP_ADDR: ":8080"
+      DATABASE_URL: "postgres://media:${MEDIA_POSTGRES_PASSWORD}@media-postgres:5432/media?sslmode=disable"
+      ENV: local
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:-${MEDIA_INTERNAL_TOKEN}}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:-${MEDIA_INTERNAL_TOKEN}-users}
       MEDIA_S3_REGION: us-east-1
@@ -535,7 +534,6 @@ services:
       MEDIA_S3_PATH_STYLE: "true"
       MEDIA_PUBLIC_BASE_URL: http://localhost:${MINIO_API_PORT:-9000}/media
       MEDIA_CLAMAV_ADDR: clamav:3310
-      MEDIA_WORKER_HTTP_ADDR: ":8081"
       MEDIA_USER_QUOTA_BYTES: ${MEDIA_USER_QUOTA_BYTES:-5368709120}
       MEDIA_MAX_AVATAR_BYTES: ${MEDIA_MAX_AVATAR_BYTES:-5242880}
       MEDIA_MAX_AVATAR_PIXELS: ${MEDIA_MAX_AVATAR_PIXELS:-12000000}
@@ -553,26 +551,6 @@ services:
       retries: 30
       start_period: 5s
     restart: unless-stopped
-
-  media-worker:
-    build:
-      context: ../media
-      target: worker
-      args:
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    environment: *media-environment
-    depends_on:
-      media-migrate:
-        condition: service_completed_successfully
-      media-buckets:
-        condition: service_completed_successfully
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/ready >/dev/null"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-      start_period: 5s
 
 volumes:
   kafka-data:
