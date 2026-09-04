@@ -1,6 +1,6 @@
 # Infra
 
-Локальное окружение Overmindv запускает `users`, `entities`, `tasks`, `task-hunter`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных.
+Локальное окружение Overmindv запускает `users`, `entities`, `tasks`, `task-hunter`, `sandbox`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных.
 
 ## Быстрый запуск
 
@@ -55,20 +55,32 @@ make integration  # проверить полный GraphQL-сценарий
 Используется официальный закреплённый образ `apache/kafka:4.3.1` в KRaft-режиме, поэтому ZooKeeper не нужен. Topic'и создаются автоматически и идемпотентно после готовности брокера:
 
 - `code-execution.requests.v1` — `tasks` публикует запросы, `sandbox` читает их;
-- `code-execution.results.v1` — `sandbox` публикует результаты, `tasks` читает их.
+- `code-execution.results.v1` — `sandbox` публикует результаты, `tasks` читает их;
+- `code-execution.retry.v1`, `code-execution.events.v1`, `code-execution.deadletter.v1` — служебные топики `sandbox` (ретраи, события, dead-letter).
 
-Оба topic'а имеют по три partition, replication factor `1` для одноброкерного окружения и retention семь суток. Автоматическое создание произвольных topic'ов отключено, чтобы опечатка в имени не создавала новый канал данных.
+Топики имеют по `KAFKA_TOPIC_PARTITIONS` (по умолчанию 3) partition, replication factor `1` для одноброкерного окружения и retention семь суток. Автоматическое создание произвольных topic'ов отключено, чтобы опечатка в имени не создавала новый канал данных.
 
 Bootstrap servers:
 
 - из контейнеров Docker Compose — `kafka:9092`;
 - с хост-машины — `localhost:29092` или порт из `KAFKA_PORT`.
 
-Если команда `sandbox` запускает свой контейнер отдельным Compose-проектом, его нужно подключить к существующей external network `overmindv_default` и использовать `kafka:9092`. Публикация host-порта для такого подключения не нужна.
+`sandbox` разворачивается в этом же Compose-проекте и подключается к `kafka:9092`. По умолчанию используется `SANDBOX_EXECUTOR_TYPE=fake` (мгновенный исполнитель без gojudge), что позволяет проверить полный цикл `tasks → sandbox → tasks` без тяжёлых образов.
 
-Для будущей интеграции используйте UUID решения как Kafka message key: так запрос и повторные события одного решения сохраняют порядок в одной partition. Рекомендуемые consumer groups: `sandbox-code-execution-v1` для запросов и `tasks-code-results-v1` для результатов. Имена topic'ов и параметры хранения задаются через `KAFKA_REQUESTS_TOPIC`, `KAFKA_RESULTS_TOPIC`, `KAFKA_TOPIC_PARTITIONS` и `KAFKA_RETENTION_MS`.
+Для реального исполнения кода включите gojudge:
 
-Локальные listeners используют `PLAINTEXT` и предназначены только для разработки. Сам сервис `sandbox` в этом репозитории не разворачивается и не изменяется.
+```bash
+# в .env:
+SANDBOX_EXECUTOR_TYPE=gojudge
+SANDBOX_FEATURE_FAKE_EXECUTOR=false
+SANDBOX_FEATURE_GOJUDGE_EXECUTOR=true
+# затем поднимите стек с профилем gojudge (требуются рантайм-образы языков из languages.yaml):
+docker compose --env-file .env -f docker-compose.yml --profile gojudge up -d --build
+```
+
+Используйте UUID решения как Kafka message key: так запрос и повторные события одного решения сохраняют порядок в одной partition. Рекомендуемые consumer groups: `sandbox-code-execution-v1` для запросов и `tasks-code-results-v1` для результатов. Имена topic'ов и параметры хранения задаются через `KAFKA_REQUESTS_TOPIC`, `KAFKA_RESULTS_TOPIC`, `KAFKA_RETRY_TOPIC`, `KAFKA_EVENTS_TOPIC`, `KAFKA_DEADLETTER_TOPIC`, `KAFKA_TOPIC_PARTITIONS` и `KAFKA_RETENTION_MS`.
+
+Локальные listeners используют `PLAINTEXT` и предназначены только для разработки.
 
 ## Опциональный Telegram
 
