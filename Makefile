@@ -64,7 +64,7 @@ push:
 
 # Логи основных сервисов
 logs: init
-	@$(COMPOSE) logs -f kafka users entities tasks task-hunter api-gateway frontend
+	@$(COMPOSE) logs -f kafka users entities tasks task-hunter sandbox api-gateway frontend
 
 # Логи сервисов, обрабатывающих пользовательские запросы
 request-logs: init

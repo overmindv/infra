@@ -43,10 +43,16 @@ services:
         set -eu
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_REQUESTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_RESULTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_RETRY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_EVENTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_DEADLETTER_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
+      KAFKA_RETRY_TOPIC: ${KAFKA_RETRY_TOPIC:-code-execution.retry.v1}
+      KAFKA_EVENTS_TOPIC: ${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}
+      KAFKA_DEADLETTER_TOPIC: ${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}
       KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
       KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
@@ -54,6 +60,20 @@ services:
       kafka:
         condition: service_healthy
     restart: "no"
+
+  # kafka-ui — веб-панель для просмотра топиков, consumer-групп, лага и сообщений.
+  # Открывается на http://localhost:${KAFKA_UI_PORT:-8086} (никто не должен открывать :29092 в браузере — это TCP-порт брокера).
+  kafka-ui:
+    image: ${KAFKA_UI_IMAGE:-provectuslabs/kafka-ui:latest}
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "${KAFKA_UI_PORT:-8086}:8080"
+    restart: unless-stopped
 
   users-postgres:
     image: postgres:17-alpine
@@ -231,6 +251,65 @@ services:
       timeout: 3s
       retries: 20
       start_period: 5s
+    restart: unless-stopped
+
+  # sandbox — исполнитель кода (gojudge/fake): потребляет code-execution.requests.v1
+  # из tasks, исполняет код по входным кейсам и публикует результат в results.v1.
+  sandbox:
+    build:
+      context: ../sandbox
+      dockerfile: deployments/docker/Dockerfile.worker
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      SANDBOX_ENV: local
+      SANDBOX_LOG_LEVEL: ${SANDBOX_LOG_LEVEL:-info}
+      SANDBOX_KAFKA_BROKERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      SANDBOX_KAFKA_GROUP_ID: ${SANDBOX_KAFKA_GROUP_ID:-sandbox-code-execution-v1}
+      SANDBOX_KAFKA_TOPIC_REQUESTS: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
+      SANDBOX_KAFKA_TOPIC_RETRY: ${KAFKA_RETRY_TOPIC:-code-execution.retry.v1}
+      SANDBOX_KAFKA_TOPIC_EVENTS: ${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}
+      SANDBOX_KAFKA_TOPIC_RESULTS: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
+      SANDBOX_KAFKA_TOPIC_DEADLETTER: ${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}
+      # fake — мгновенный исполнитель без gojudge (по умолчанию); gojudge — реальное исполнение.
+      SANDBOX_EXECUTOR_TYPE: ${SANDBOX_EXECUTOR_TYPE:-fake}
+      SANDBOX_FEATURE_FAKE_EXECUTOR: ${SANDBOX_FEATURE_FAKE_EXECUTOR:-true}
+      SANDBOX_FEATURE_GOJUDGE_EXECUTOR: ${SANDBOX_FEATURE_GOJUDGE_EXECUTOR:-false}
+      SANDBOX_GOJUDGE_BASE_URL: http://gojudge:5050
+      SANDBOX_STORAGE_TYPE: ${SANDBOX_STORAGE_TYPE:-memory}
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully
+    ports:
+      - "${SANDBOX_HEALTH_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/readyz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  # gojudge — песочница реального исполнения кода (isolate). Опциональна: запускается профилем
+  # "gojudge" и требует SANDBOX_EXECUTOR_TYPE=gojudge в .env (а также рантайм-образы языков).
+  gojudge:
+    profiles: ["gojudge"]
+    build:
+      context: ../sandbox
+      dockerfile: deployments/docker/Dockerfile.gojudge-runtime
+      args:
+        GOJUDGE_IMAGE: ${SANDBOX_GOJUDGE_IMAGE:-criyle/go-judge:latest}
+        GO_RUNTIME_VERSION: 1.26
+    privileged: true
+    shm_size: 256m
+    ports:
+      - "${SANDBOX_GOJUDGE_HOST_PORT:-5050}:5050"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5050/version >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     restart: unless-stopped
 
   task-hunter-postgres:
