@@ -47,6 +47,8 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_EVENTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_DEADLETTER_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CATALOG_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TASK_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
@@ -54,6 +56,8 @@ services:
       KAFKA_EVENTS_TOPIC: ${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}
       KAFKA_DEADLETTER_TOPIC: ${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}
       KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      KAFKA_CATALOG_ACTIVITY_TOPIC: ${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}
+      KAFKA_TASK_ACTIVITY_TOPIC: ${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
       KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
     depends_on:
@@ -253,6 +257,67 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  feed-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: feed
+      POSTGRES_USER: feed
+      POSTGRES_PASSWORD: ${FEED_POSTGRES_PASSWORD:?set FEED_POSTGRES_PASSWORD in .env}
+    ports:
+      - "${FEED_POSTGRES_PORT:-5437}:5432"
+    volumes:
+      - feed-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U feed -d feed"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  feed-migrate:
+    build:
+      context: ../feed
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      DATABASE_URL: "postgres://feed:${FEED_POSTGRES_PASSWORD}@feed-postgres:5432/feed?sslmode=disable"
+    entrypoint: ["feed", "migrate", "--dir", "/app/migrations", "up"]
+    depends_on:
+      feed-postgres:
+        condition: service_healthy
+    restart: "no"
+
+  feed:
+    build:
+      context: ../feed
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      SERVICE_NAME: feed
+      HTTP_ADDR: ":8080"
+      ENV: local
+      LOG_LEVEL: info
+      DATABASE_URL: "postgres://feed:${FEED_POSTGRES_PASSWORD}@feed-postgres:5432/feed?sslmode=disable"
+      FEED_GATEWAY_TOKEN: ${FEED_GATEWAY_TOKEN:?set FEED_GATEWAY_TOKEN in .env}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CATALOG_ACTIVITY_TOPIC: ${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}
+      KAFKA_TASK_ACTIVITY_TOPIC: ${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}
+      FEED_CONSUMER_GROUP: ${FEED_CONSUMER_GROUP:-feed-v1}
+    depends_on:
+      feed-migrate:
+        condition: service_completed_successfully
+      kafka-topics:
+        condition: service_completed_successfully
+    ports:
+      - "${FEED_PORT:-8087}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    restart: unless-stopped
+
   # sandbox — исполнитель кода (gojudge/fake): потребляет code-execution.requests.v1
   # из tasks, исполняет код по входным кейсам и публикует результат в results.v1.
   sandbox:
@@ -402,6 +467,9 @@ services:
       MEDIA_URL: http://media:8080
       MEDIA_TOKEN: ${MEDIA_GATEWAY_TOKEN:-${MEDIA_INTERNAL_TOKEN}}
       MEDIA_TIMEOUT: ${MEDIA_TIMEOUT:-10s}
+      FEED_URL: http://feed:8080
+      FEED_TOKEN: ${FEED_GATEWAY_TOKEN:?set FEED_GATEWAY_TOKEN in .env}
+      FEED_TIMEOUT: ${FEED_TIMEOUT:-10s}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
@@ -417,6 +485,8 @@ services:
       task-hunter:
         condition: service_healthy
       media:
+        condition: service_healthy
+      feed:
         condition: service_healthy
     ports:
       - "${API_GATEWAY_PORT:-8081}:8081"
@@ -638,6 +708,7 @@ volumes:
   tasks-postgres:
   task-hunter-postgres:
   content-postgres:
+  feed-postgres:
   media-postgres:
   minio-data:
   clamav-data:
