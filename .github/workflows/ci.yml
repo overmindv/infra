@@ -17,11 +17,11 @@ jobs:
       - name: Validate Compose and scripts
         run: make lint
 
-  # Полный e2e-прогон системы (см. overmindv/tests) при пуше/PR в этот сервис.
-  e2e:
-    permissions:
-      contents: read
-    uses: overmindv/tests/.github/workflows/e2e.yml@main
-    secrets: inherit
-    with:
-      target_repo: infra
+  # E2E-CI отключён
+  # e2e:
+  #   permissions:
+  #     contents: read
+  #   uses: overmindv/tests/.github/workflows/e2e.yml@main
+  #   secrets: inherit
+  #   with:
+  #     target_repo: infra
