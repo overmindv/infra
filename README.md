@@ -1,6 +1,6 @@
 # Infra
 
-Локальное окружение Overmindv запускает `users`, `entities`, `tasks`, `task-hunter`, `sandbox`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных.
+Локальное окружение Overmindv запускает `users`, `entities`, `tasks`, `task-hunter`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных. Исполнитель кода `sandbox` — профильный сервис: он не нужен unit/integration-тестам (programming-сабмиты проходят до статуса `queued`) и поднимается отдельно (`make up SANDBOX=1`).
 
 ## Быстрый запуск
 
@@ -14,7 +14,7 @@ make up
 
 - создаст `.env`, если его ещё нет;
 - сгенерирует пароли PostgreSQL, JWT secret и внутренние service tokens;
-- соберёт образы;
+- соберёт образы — не более `BUILD_PARALLEL` одновременно (по умолчанию 2). На машинах с ~8 ГБ RAM полный параллелизм 16 Go-сборок приводит к Docker OOM (`ResourceExhausted`/`signal: killed`), поэтому сборка лимитирована; для совсем слабых машин: `make up BUILD_PARALLEL=1`;
 - запустит PostgreSQL, применит миграции и поднимет Kafka в KRaft-режиме;
 - создаст Kafka topic'и запросов на выполнение кода и результатов;
 - поднимет backend, gateway и frontend;
@@ -38,14 +38,17 @@ make up
 ## Основные команды
 
 ```bash
-make up           # собрать и запустить всё
-make status       # показать состояние контейнеров
-make logs         # показать общие логи
-make kafka-check  # проверить topic'и и полный producer/consumer flow
-make credentials  # показать локальный URL и admin credentials
-make down         # остановить и сохранить базы
-make clean        # остановить и удалить локальные базы/volumes
-make integration  # проверить полный GraphQL-сценарий
+make up                     # собрать и запустить стек (без sandbox)
+make up SANDBOX=1           # то же + исполнитель кода sandbox (нужен для verdict по programming-задачам)
+make sandbox-up             # достроить sandbox поверх уже работающего стека
+make up BUILD_PARALLEL=1    # сборка образов строго по одному (минимум RAM при сборке)
+make status                 # показать состояние контейнеров
+make logs                   # показать общие логи
+make kafka-check            # проверить topic'и и полный producer/consumer flow
+make credentials            # показать локальный URL и admin credentials
+make down                   # остановить и сохранить базы
+make clean                  # остановить и удалить локальные базы/volumes
+make integration            # проверить полный GraphQL-сценарий
 ```
 
 `tasks` и `task-hunter` доступны только во внутренней Docker-сети. Frontend обращается только к `api-gateway`.
@@ -65,7 +68,7 @@ Bootstrap servers:
 - из контейнеров Docker Compose — `kafka:9092`;
 - с хост-машины — `localhost:29092` или порт из `KAFKA_PORT`.
 
-`sandbox` разворачивается в этом же Compose-проекте и подключается к `kafka:9092`. По умолчанию используется `SANDBOX_EXECUTOR_TYPE=fake` (мгновенный исполнитель без gojudge), что позволяет проверить полный цикл `tasks → sandbox → tasks` без тяжёлых образов.
+`sandbox` разворачивается в этом же Compose-проекте и подключается к `kafka:9092`. Это профильный сервис: `make up` его не собирает; включить — `make up SANDBOX=1` или `make sandbox-up`. Без sandbox программинг-сабмиты `tasks` остаются в статусе `queued` (verdict не выставляется) — для unit/integration-тестов это не мешает: `make integration` доходит до `queued` и не ждёт вердикт. По умолчанию используется `SANDBOX_EXECUTOR_TYPE=fake` (мгновенный исполнитель без gojudge), что позволяет проверить полный цикл `tasks → sandbox → tasks` без тяжёлых образов.
 
 Для реального исполнения кода включите gojudge:
 
