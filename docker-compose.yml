@@ -323,7 +323,11 @@ services:
 
   # sandbox — исполнитель кода (gojudge/fake): потребляет code-execution.requests.v1
   # из tasks, исполняет код по входным кейсам и публикует результат в results.v1.
+  # Профильный сервис: НЕ входит в дефолтный `make up` — он не нужен unit/integration-тестам,
+  # а его Go-сборка тяжёлая (важно на машинах с малым объёмом RAM). Без него programming-сабмиты
+  # остаются в статусе queued (verdict не выставляется). Поднять: `make up SANDBOX=1` или `make sandbox-up`.
   sandbox:
+    profiles: ["sandbox"]
     build:
       context: ../sandbox
       dockerfile: deployments/docker/Dockerfile.worker
@@ -596,7 +600,7 @@ services:
     restart: unless-stopped
 
   minio:
-    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    image: cgr.dev/chainguard/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
@@ -615,7 +619,7 @@ services:
     restart: unless-stopped
 
   media-buckets:
-    image: ${MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-04-16T18-13-26Z}
+    image: cgr.dev/chainguard/minio:latest
     platform: ${MEDIA_TOOL_PLATFORM:-linux/amd64}
     entrypoint: ["/bin/sh", "-c"]
     command:

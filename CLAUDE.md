@@ -33,7 +33,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Нужен только Docker Desktop. Всё из корня `infra`:
 
 ```bash
-make up              # создать .env, собрать образы, поднять весь стек, применить миграции, дождаться healthchecks
+make up              # создать .env, собрать образы, поднять весь стек БЕЗ sandbox, применить миграции, дождаться healthchecks
+make up SANDBOX=1    # то же + исполнитель кода sandbox (нужен для verdict по programming-задачам)
+make sandbox-up      # достроить и поднять только sandbox поверх работающего стека
+make up BUILD_PARALLEL=1  # сборка образов строго по одному (минимум RAM при сборке)
 make status          # состояние контейнеров
 make logs            # логи всех сервисов
 make request-logs    # логи обработчиков запросов (gateway/entities/tasks/task-hunter)
