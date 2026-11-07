@@ -25,7 +25,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Topic `code-execution.results.v1` — `sandbox` публикует результаты, их читает `tasks`.
 - Kafka в KRaft-режиме (без ZooKeeper), 3 partition, retention 7 суток, `KAFKA_AUTO_CREATE_TOPICS_ENABLE=false`.
 - Bootstrap servers: из контейнеров Compose — `kafka:9092`; с хоста — `localhost:29092`.
-- **`sandbox` в этом репозитории не разворачивается и не меняется.**
+- **`sandbox` разворачивается опциональным профилем (`SANDBOX=1`); его код здесь не меняется.**
 - Message key — UUID решения (порядок в partition). Consumer groups: `sandbox-code-execution-v1` (запросы), `tasks-code-results-v1` (результаты).
 
 ## Локальная разработка
@@ -66,3 +66,18 @@ make integration                   # сквозной GraphQL-сценарий (
 ## Telegram (опционально)
 
 Сбор из Telegram в `task-hunter` выключен по умолчанию (`TASK_HUNTER_TELEGRAM_ENABLED=false`) — основной стек работает без внешнего аккаунта. Чтобы включить: заполнить `TASK_HUNTER_TELEGRAM_API_ID`/`API_HASH` (это не BotFather token), создать MTProto session через `make telegram-login` (интерактивный одноразовый код), session хранится в `.local/task-hunter/telegram.session`. Website-сбор работает без ключей; публичный Reader fallback Codeforces задаётся через `TASK_HUNTER_CODEFORCES_READER_URL`.
+
+## Общий agent harness
+
+Для изменения поведения прочитай `../docs/harness/README.md` и релевантную
+спецификацию в `../docs/openspec/`. Это sibling-репозиторий `overmindv/docs`,
+а не каталог документации этого сервиса. При отдельном checkout и отсутствии
+соседа используй локальные правила; нехватку сквозного контекста укажи явно.
+
+- Перед работой зафиксируй `git status --short`; сохраняй чужие незавершённые изменения.
+- Работай одним проверяемым срезом; рутинные обратимые решения принимай самостоятельно.
+- На смену контракта найди производителей/потребителей и проверь их совместимость.
+- Пользовательские сценарии студента и автора/модератора имеют равный приоритет.
+- Проверки: `make -C ../infra agent-verify SERVICE=infra DRY_RUN=1` показывает команды.
+- В конце приведи фактические результаты и непроверенные места; сохрани следующий шаг.
+- Не публикуй, не очищай БД и не отправляй изменения автоматически.

@@ -3,9 +3,12 @@ COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
 # Сколько образов собирать одновременно. На машинах с малым объёмом RAM (8 ГБ и меньше)
 # оставляйте 1–2: иначе одновременно компилируется 16 Go-проектов → Docker OOM (signal: killed).
 BUILD_PARALLEL ?= 2
+PYTHON ?= python3
+TIMEOUT ?= 300
 .DEFAULT_GOAL := help
 
 .PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration update sandbox-up sandbox-down
+.PHONY: agent-context agent-check agent-verify agent-harness-test
 
 # Краткая справка по локальному запуску
 help:
@@ -22,6 +25,9 @@ help:
 	@echo "make credentials    Показать URL и локального администратора"
 	@echo "make telegram-login Создать опциональную Telegram session"
 	@echo "make update         Обновить все сервисные репозитории из их удалённых default-веток"
+	@echo "make agent-context  Контекст репозиториев без секретов (опционально SERVICE=tasks)"
+	@echo "make agent-check    Проверить инструкции и команды (STRICT=1 требует все репозитории)"
+	@echo "make agent-verify SERVICE=tasks DRY_RUN=1  Показать план проверок выбранного сервиса"
 
 # Подготовка локального env с автоматически сгенерированными секретами
 init:
@@ -121,3 +127,16 @@ test: lint
 # Запуск сквозного GraphQL-сценария на поднятом стеке
 integration: init
 	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/integration.sh
+
+# Harness не запускает init, не читает .env и не поднимает стек.
+agent-context:
+	@$(PYTHON) scripts/agent_harness.py context $(if $(SERVICE),--service "$(SERVICE)")
+
+agent-check:
+	@$(PYTHON) scripts/agent_harness.py check $(if $(SERVICE),--service "$(SERVICE)") $(if $(filter 1,$(STRICT)),--strict-workspace)
+
+agent-verify:
+	@$(PYTHON) scripts/agent_harness.py verify --service "$(SERVICE)" $(if $(filter 1,$(DRY_RUN)),--dry-run) --timeout "$(TIMEOUT)"
+
+agent-harness-test:
+	@$(PYTHON) -m unittest discover -s tests -p 'test_agent_harness.py'

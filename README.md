@@ -134,6 +134,17 @@ Session хранится в `infra/.local/task-hunter/telegram.session`, име�
 
 ## Проверка
 
+Для разработки агентами есть локальный [harness](docs/agent-harness.md):
+
+```bash
+make agent-context SERVICE=tasks
+make agent-check
+make agent-verify SERVICE=tasks DRY_RUN=1
+make agent-harness-test
+```
+
+Общие правила процесса и OpenSpec: [docs/harness](../docs/harness/README.md).
+
 ```bash
 make lint
 make kafka-check
