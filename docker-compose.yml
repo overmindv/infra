@@ -454,6 +454,22 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  recommendations:
+    build:
+      context: ../recommendations
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      HTTP_ADDRESS: ":8080"
+      RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   api-gateway:
     build:
       context: ../api-gateway
@@ -477,6 +493,8 @@ services:
       FEED_URL: http://feed:8080
       FEED_TOKEN: ${FEED_GATEWAY_TOKEN:?set FEED_GATEWAY_TOKEN in .env}
       FEED_TIMEOUT: ${FEED_TIMEOUT:-10s}
+      RECOMMENDATIONS_URL: http://recommendations:8080
+      RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
@@ -494,6 +512,8 @@ services:
       media:
         condition: service_healthy
       feed:
+        condition: service_healthy
+      recommendations:
         condition: service_healthy
     ports:
       - "${API_GATEWAY_PORT:-8081}:8081"

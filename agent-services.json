@@ -398,6 +398,27 @@
           ]
         }
       ]
+    },
+    "recommendations": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
     }
   }
 }

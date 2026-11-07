@@ -121,6 +121,7 @@ test: lint
 	$(MAKE) -C ../tasks test
 	cd ../task-hunter && go test ./...
 	$(MAKE) -C ../api-gateway test
+	$(MAKE) -C ../recommendations test
 	npm --prefix ../frontend run typecheck
 	npm --prefix ../frontend run test:ci
 
@@ -140,3 +141,8 @@ agent-verify:
 
 agent-harness-test:
 	@$(PYTHON) -m unittest discover -s tests -p 'test_agent_harness.py'
+
+# Реальные gateway/recommendations с контролируемыми upstream, без Docker и БД.
+.PHONY: recommendations-contract
+recommendations-contract:
+	@$(PYTHON) tests/recommendations_contract.py
