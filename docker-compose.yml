@@ -79,6 +79,9 @@ services:
       - "${KAFKA_UI_PORT:-8086}:8080"
     restart: unless-stopped
 
+  # Probe TCP explicitly: the official image starts a temporary Unix-socket-only
+  # server during initdb. Socket readiness can release migrations before the final
+  # TCP listener exists. This applies to every Postgres service below.
   users-postgres:
     image: postgres:17-alpine
     environment:
@@ -90,7 +93,7 @@ services:
     volumes:
       - users-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -151,7 +154,7 @@ services:
     volumes:
       - entities-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U entities -d entities"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U entities -d entities"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -205,7 +208,7 @@ services:
     volumes:
       - tasks-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tasks -d tasks"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tasks -d tasks"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -271,7 +274,7 @@ services:
     volumes:
       - feed-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U feed -d feed"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U feed -d feed"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -393,7 +396,7 @@ services:
     volumes:
       - task-hunter-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U task_hunter -d task_hunter"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U task_hunter -d task_hunter"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -553,7 +556,7 @@ services:
     volumes:
       - content-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U content -d content"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U content -d content"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -613,7 +616,7 @@ services:
     volumes:
       - media-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U media -d media"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U media -d media"]
       interval: 2s
       timeout: 3s
       retries: 30
