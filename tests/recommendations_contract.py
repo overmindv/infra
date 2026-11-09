@@ -45,6 +45,7 @@ QUERY = """query Practice($topics:[ID!]!, $minutes:Int!) {
 
 class Fixtures(BaseHTTPRequestHandler):
     accepted = False
+    wrong = False
     failing = False
     actors = []
 
@@ -67,11 +68,11 @@ class Fixtures(BaseHTTPRequestHandler):
             if self.failing:
                 status, body = 500, {"code": "INTERNAL", "message": "PRIVATE_UPSTREAM_CANARY"}
             else:
-                if self.accepted and actor == USER and path == "/v1/me/submissions":
+                if (self.accepted or self.wrong) and actor == USER and path == "/v1/me/submissions":
                     items = [{"id": "30000000-0000-4000-8000-000000000001",
                               "user_id": USER, "task_id": TASKS[0]["id"],
                               "task_version_id": TASKS[0]["task_version_id"],
-                              "correct": True, "verdict": "accepted",
+                              "correct": self.accepted, "verdict": "accepted" if self.accepted else "wrong_answer",
                               "correct_option_ids": ["PRIVATE_ANSWER_CANARY"],
                               "created_at": "2026-11-01T12:00:00Z"}]
                 body = {"items": items, "limit": 100, "offset": 0}
@@ -193,10 +194,16 @@ def main():
                         cold = call(url)
                         assert not cold.get("errors"), "Cold-start GraphQL request failed: " + json.dumps(cold)
                         plan = cold["data"]["practicePlan"]
-                        assert plan["policyVersion"] == "practice-v1" and plan["items"], "Missing preview"
+                        assert plan["policyVersion"] == "practice-v2" and plan["items"], "Missing preview"
                         assert sum(x["estimatedMinutes"] for x in plan["items"]) == plan["totalMinutes"] <= 30
                         assert all(actor == USER for actor in Fixtures.actors), "Forged actor forwarded"
                         assert all(x["reasonCode"] == "START_TOPIC" for x in plan["items"])
+                        Fixtures.wrong = True
+                        retry = call(url)
+                        assert not retry.get("errors"), "Wrong-answer request failed"
+                        assert retry["data"]["practicePlan"]["items"][0]["taskId"] == TASKS[1]["id"], "Failed task took priority over fresh practice"
+                        assert retry["data"]["practicePlan"]["items"][0]["reasonCode"] == "PRACTICE_GAP"
+                        Fixtures.wrong = False
                         Fixtures.accepted = True
                         updated = call(url)
                         assert not updated.get("errors"), "Updated-history request failed"
@@ -213,7 +220,7 @@ def main():
                         reco.wait(timeout=5)
                         Fixtures.failing = False
                         assert call(url).get("errors"), "Unavailable recommender silently accepted"
-            print("PASS: real GraphQL → recommender contract; auth, bounds, budget, actor isolation, history recalculation, failure handling")
+            print("PASS: real GraphQL → recommender contract; auth, budget, actor isolation, alternative after failure, history recalculation, failure handling")
         finally:
             server.shutdown()
             server.server_close()
