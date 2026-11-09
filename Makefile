@@ -40,7 +40,7 @@ SANDBOX_FLAG := $(if $(SANDBOX),--profile sandbox)
 
 # Сервисы с build-полями (sandbox — опционально, добавляется в конец при SANDBOX=1)
 BUILD_SERVICES := users-migrate users entities-migrate entities tasks-migrate tasks \
-	feed-migrate feed task-hunter-migrate task-hunter api-gateway content-migrate content \
+	feed-migrate feed task-hunter-migrate task-hunter recommendations-migrate recommendations api-gateway content-migrate content \
 	media-migrate media frontend $(if $(SANDBOX),sandbox)
 
 # Сборка и запуск локального стека с ожиданием готовности

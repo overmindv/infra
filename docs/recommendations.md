@@ -5,8 +5,11 @@ Gateway вызывает его по `RECOMMENDATIONS_URL`, общий service t
 `make init`/`scripts/prepare-env.sh` создаёт `RECOMMENDATIONS_SERVICE_TOKEN`, в том числе
 при обновлении существующего `.env`. Значения токена не выводить и не коммитить.
 
-Сервис не требует своей PostgreSQL, Kafka, Redis, GPU или внешнего AI API.
-Это preview на bounded metadata/history из gateway, а не постоянная учебная модель.
+Compose поднимает отдельную `recommendations-postgres` и одноразовый
+`recommendations-migrate`. БД хранит выбранные темы и бюджет занятия каждого
+пользователя; preview строится по актуальной bounded metadata/history из gateway.
+Kafka, Redis, GPU и внешний AI API не требуются. Сохранённая цель не является
+постоянной учебной моделью или доказательством освоения.
 При запуске всего стека нужен sibling checkout `../recommendations`.
 Frontend страница `/practice` требует входа. Нужны активные темы и опубликованные
 задачи с привязкой к темам. Пустой каталог честно даёт пустую подборку.
@@ -25,4 +28,7 @@ make recommendations-contract
 
 `recommendations-contract` собирает два Go binary и запускает их на локальных временных
 портах с synthetic upstream. Проверяет GraphQL/HTTP, actor isolation, бюджет, историю
-и безопасные отказы. Это не e2e с настоящими tasks/entities. Требует Go; не читает `.env`.
+и безопасные отказы. Без БД проверяет preview. Если задана
+`CONTRACT_GOALS_TEST_DSN` с **выделенной тестовой БД** и заранее применённой
+миграцией, дополнительно проверяет сохранение, чтение, изоляцию и удаление цели.
+Это не e2e с настоящими tasks/entities. Требует Go; не читает `.env`.

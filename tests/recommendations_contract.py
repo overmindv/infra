@@ -170,6 +170,9 @@ def main():
         base = {k: v for k, v in os.environ.items() if k in ("PATH", "HOME", "TMPDIR", "SYSTEMROOT")}
         reco_env = {**base, "HTTP_ADDRESS": f"127.0.0.1:{reco_port}",
                     "RECOMMENDATIONS_SERVICE_TOKEN": SERVICE_TOKEN}
+        goals_dsn = os.environ.get("CONTRACT_GOALS_TEST_DSN", "")
+        if goals_dsn:
+            reco_env["DATABASE_URL"] = goals_dsn
         gateway_env = {**base, "PORT": str(gateway_port), "JWT_SECRET": JWT_SECRET,
                        "JWT_ISSUER": "users", "RECOMMENDATIONS_URL": reco_url,
                        **{name + "_TOKEN": "synthetic-fixture-token" for name in ("TASK_HUNTER", "MEDIA", "FEED")},
@@ -198,6 +201,25 @@ def main():
                         assert sum(x["estimatedMinutes"] for x in plan["items"]) == plan["totalMinutes"] <= 30
                         assert all(actor == USER for actor in Fixtures.actors), "Forged actor forwarded"
                         assert all(x["reasonCode"] == "START_TOPIC" for x in plan["items"])
+                        if goals_dsn:
+                            assert call(url, user=None, query="{ myPracticeGoal { revision } }").get("errors"), "Unauthenticated goal read allowed"
+                            empty_goal = call(url, query="{ myPracticeGoal { revision } }")
+                            assert empty_goal.get("data", {}).get("myPracticeGoal") is None, "Invented saved goal"
+                            save_goal = call(url, query=('mutation { savePracticeGoal(topicIds:["' + TOPIC + '"], minutes:30) '
+                                                         '{ topics { id title status } minutes revision } }'))
+                            assert not save_goal.get("errors"), "Could not save goal"
+                            saved = save_goal["data"]["savePracticeGoal"]
+                            assert saved["topics"][0]["id"] == TOPIC and saved["revision"] == 1
+                            assert call(url, user=OTHER, query="{ myPracticeGoal { revision } }")["data"]["myPracticeGoal"] is None, "Goal crossed actors"
+                            reload_goal = call(url, query="{ myPracticeGoal { revision minutes } }")
+                            assert reload_goal["data"]["myPracticeGoal"]["minutes"] == 30, "Goal not persisted"
+                            replaced = call(url, query=('mutation { savePracticeGoal(topicIds:["' + TOPIC + '"], minutes:45) '
+                                                        '{ minutes revision } }'))
+                            assert replaced["data"]["savePracticeGoal"] == {"minutes": 45, "revision": 2}, "Goal replacement failed"
+                            deleted = call(url, query="mutation { deletePracticeGoal }")
+                            assert deleted["data"]["deletePracticeGoal"] is True, "Goal not deleted"
+                            assert call(url, query="mutation { deletePracticeGoal }")["data"]["deletePracticeGoal"] is True, "Repeated delete failed"
+                            assert call(url, query="{ myPracticeGoal { revision } }")["data"]["myPracticeGoal"] is None
                         Fixtures.wrong = True
                         retry = call(url)
                         assert not retry.get("errors"), "Wrong-answer request failed"
@@ -220,7 +242,8 @@ def main():
                         reco.wait(timeout=5)
                         Fixtures.failing = False
                         assert call(url).get("errors"), "Unavailable recommender silently accepted"
-            print("PASS: real GraphQL → recommender contract; auth, budget, actor isolation, alternative after failure, history recalculation, failure handling")
+            goal_scope = ", saved-goal lifecycle" if goals_dsn else ""
+            print("PASS: real GraphQL → recommender contract; auth, budget, actor isolation, alternative after failure, history recalculation, failure handling" + goal_scope)
         finally:
             server.shutdown()
             server.server_close()

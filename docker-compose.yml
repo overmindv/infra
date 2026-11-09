@@ -457,6 +457,36 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  recommendations-postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: recommendations
+      POSTGRES_USER: recommendations
+      POSTGRES_PASSWORD: ${RECOMMENDATIONS_POSTGRES_PASSWORD:?set RECOMMENDATIONS_POSTGRES_PASSWORD in .env}
+    ports:
+      - "${RECOMMENDATIONS_POSTGRES_PORT:-5438}:5432"
+    volumes:
+      - recommendations-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U recommendations -d recommendations"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  recommendations-migrate:
+    build:
+      context: ../recommendations
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      DATABASE_URL: "postgres://recommendations:${RECOMMENDATIONS_POSTGRES_PASSWORD}@recommendations-postgres:5432/recommendations?sslmode=disable"
+    entrypoint: ["recommendations", "migrate", "--dir", "/app/migrations", "up"]
+    depends_on:
+      recommendations-postgres:
+        condition: service_healthy
+    restart: "no"
+
   recommendations:
     build:
       context: ../recommendations
@@ -464,7 +494,11 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       HTTP_ADDRESS: ":8080"
+      DATABASE_URL: "postgres://recommendations:${RECOMMENDATIONS_POSTGRES_PASSWORD}@recommendations-postgres:5432/recommendations?sslmode=disable"
       RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
+    depends_on:
+      recommendations-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
       interval: 5s
@@ -739,6 +773,7 @@ volumes:
   task-hunter-postgres:
   content-postgres:
   feed-postgres:
+  recommendations-postgres:
   media-postgres:
   minio-data:
   clamav-data:
