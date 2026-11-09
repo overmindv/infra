@@ -1,0 +1,424 @@
+{
+  "version": 1,
+  "shared_references": [
+    "docs/harness/README.md",
+    "docs/harness/workspace/AGENTS.md",
+    "docs/openspec/config.yaml"
+  ],
+  "excluded": [
+    "sandbox"
+  ],
+  "services": {
+    "docs": {
+      "instructions": [
+        "AGENTS.md",
+        "AGENT.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "npm",
+            "run",
+            "check"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        },
+        {
+          "argv": [
+            "npm",
+            "run",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "npm",
+            "run",
+            "lint"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        }
+      ]
+    },
+    "infra": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "agent-harness-test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "lint"
+          ]
+        }
+      ]
+    },
+    "frontend": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "npm",
+            "run",
+            "lint"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        },
+        {
+          "argv": [
+            "npm",
+            "run",
+            "typecheck"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        },
+        {
+          "argv": [
+            "npm",
+            "run",
+            "test:ci"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        },
+        {
+          "argv": [
+            "npm",
+            "run",
+            "build"
+          ],
+          "requires": [
+            "node_modules"
+          ]
+        }
+      ]
+    },
+    "api-gateway": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "users": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "entities": {
+      "instructions": [
+        "AGENTS.md",
+        "AGENT.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "tasks": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "task-hunter": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "media": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "feed": {
+      "instructions": [
+        "AGENTS.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "content": {
+      "instructions": [
+        "AGENTS.md",
+        "README.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "parker": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint"
+          ],
+          "requires": [
+            "bin/golangci-lint"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    },
+    "tests": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "lint-check"
+          ],
+          "requires": [
+            ".venv/bin/ruff"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "test"
+          ],
+          "requires": [
+            ".venv/bin/pytest"
+          ]
+        }
+      ]
+    },
+    "recommendations": {
+      "instructions": [
+        "AGENTS.md",
+        "CLAUDE.md",
+        "GEMINI.md"
+      ],
+      "checks": [
+        {
+          "argv": [
+            "make",
+            "test"
+          ]
+        },
+        {
+          "argv": [
+            "make",
+            "build"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,12 +1,22 @@
 ENV_FILE ?= .env
 COMPOSE := docker compose --env-file $(ENV_FILE) -f docker-compose.yml
+# Сколько образов собирать одновременно. На машинах с малым объёмом RAM (8 ГБ и меньше)
+# оставляйте 1–2: иначе одновременно компилируется 16 Go-проектов → Docker OOM (signal: killed).
+BUILD_PARALLEL ?= 2
+PYTHON ?= python3
+TIMEOUT ?= 300
 .DEFAULT_GOAL := help
 
-.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration update
+.PHONY: help init up down clean restart status credentials telegram-login build push logs request-logs kafka-check lint test integration update sandbox-up sandbox-down
+.PHONY: agent-context agent-check agent-verify agent-harness-test
 
 # Краткая справка по локальному запуску
 help:
-	@echo "make up             Собрать и запустить весь локальный стек"
+	@echo "make up             Собрать и запустить базовый стек (БЕЗ sandbox)"
+	@echo "make up SANDBOX=1   То же + исполнитель кода sandbox (нужен для verdict по programming-задачам)"
+	@echo "make up BUILD_PARALLEL=1  Сборка образов строго по одному (минимум RAM при сборке)"
+	@echo "make sandbox-up     Достроить/поднять только sandbox поверх работающего стека"
+	@echo "make sandbox-down   Остановить и удалить контейнер sandbox"
 	@echo "make down           Остановить стек и сохранить данные"
 	@echo "make clean          Остановить стек и удалить локальные базы"
 	@echo "make status         Показать состояние контейнеров"
@@ -15,15 +25,29 @@ help:
 	@echo "make credentials    Показать URL и локального администратора"
 	@echo "make telegram-login Создать опциональную Telegram session"
 	@echo "make update         Обновить все сервисные репозитории из их удалённых default-веток"
+	@echo "make agent-context  Контекст репозиториев без секретов (опционально SERVICE=tasks)"
+	@echo "make agent-check    Проверить инструкции и команды (STRICT=1 требует все репозитории)"
+	@echo "make agent-verify SERVICE=tasks DRY_RUN=1  Показать план проверок выбранного сервиса"
 
 # Подготовка локального env с автоматически сгенерированными секретами
 init:
 	@./scripts/prepare-env.sh $(ENV_FILE)
 
-# Сборка и запуск всего локального стека с ожиданием готовности
+# SANDBOX=1 включает профиль sandbox (исполнитель кода). Сборка отделена от запуска:
+# образы собираются партиями по BUILD_PARALLEL, чтобы не запускать 16 Go-сборок разом
+# (у docker compose build в Compose v5 нет флага --parallel — партии собирает скрипт).
+SANDBOX_FLAG := $(if $(SANDBOX),--profile sandbox)
+
+# Сервисы с build-полями (sandbox — опционально, добавляется в конец при SANDBOX=1)
+BUILD_SERVICES := users-migrate users entities-migrate entities tasks-migrate tasks \
+	feed-migrate feed task-hunter-migrate task-hunter api-gateway content-migrate content \
+	media-migrate media frontend $(if $(SANDBOX),sandbox)
+
+# Сборка и запуск локального стека с ожиданием готовности
 up: init
 	@./scripts/preflight.sh $(ENV_FILE)
-	@$(COMPOSE) up --build -d
+	@./scripts/build-in-parallel.sh "$(ENV_FILE)" "$(BUILD_SERVICES)" $(BUILD_PARALLEL)
+	@$(COMPOSE) up -d $(SANDBOX_FLAG)
 	@./scripts/show-local-info.sh $(ENV_FILE)
 
 # Остановка контейнеров с сохранением данных
@@ -36,6 +60,16 @@ clean: init
 
 # Перезапуск стека без удаления данных
 restart: down up
+
+# Достроить и поднять только sandbox (исполнитель кода) поверх уже запущенного стека
+sandbox-up: init
+	@./scripts/preflight.sh $(ENV_FILE)
+	@$(COMPOSE) build sandbox
+	@$(COMPOSE) up -d --profile sandbox
+
+# Остановить и удалить контейнер sandbox (образ и Kafka-топики остаются)
+sandbox-down:
+	@$(COMPOSE) rm -sf sandbox || true
 
 # Состояние всех контейнеров
 status: init
@@ -64,7 +98,7 @@ push:
 
 # Логи основных сервисов
 logs: init
-	@$(COMPOSE) logs -f kafka users entities tasks task-hunter sandbox api-gateway frontend
+	@$(COMPOSE) --profile sandbox logs -f kafka users entities tasks task-hunter sandbox api-gateway frontend
 
 # Логи сервисов, обрабатывающих пользовательские запросы
 request-logs: init
@@ -87,9 +121,28 @@ test: lint
 	$(MAKE) -C ../tasks test
 	cd ../task-hunter && go test ./...
 	$(MAKE) -C ../api-gateway test
+	$(MAKE) -C ../recommendations test
 	npm --prefix ../frontend run typecheck
 	npm --prefix ../frontend run test:ci
 
 # Запуск сквозного GraphQL-сценария на поднятом стеке
 integration: init
 	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/integration.sh
+
+# Harness не запускает init, не читает .env и не поднимает стек.
+agent-context:
+	@$(PYTHON) scripts/agent_harness.py context $(if $(SERVICE),--service "$(SERVICE)")
+
+agent-check:
+	@$(PYTHON) scripts/agent_harness.py check $(if $(SERVICE),--service "$(SERVICE)") $(if $(filter 1,$(STRICT)),--strict-workspace)
+
+agent-verify:
+	@$(PYTHON) scripts/agent_harness.py verify --service "$(SERVICE)" $(if $(filter 1,$(DRY_RUN)),--dry-run) --timeout "$(TIMEOUT)"
+
+agent-harness-test:
+	@$(PYTHON) -m unittest discover -s tests -p 'test_agent_harness.py'
+
+# Реальные gateway/recommendations с контролируемыми upstream, без Docker и БД.
+.PHONY: recommendations-contract
+recommendations-contract:
+	@$(PYTHON) tests/recommendations_contract.py

@@ -79,6 +79,9 @@ services:
       - "${KAFKA_UI_PORT:-8086}:8080"
     restart: unless-stopped
 
+  # Probe TCP explicitly: the official image starts a temporary Unix-socket-only
+  # server during initdb. Socket readiness can release migrations before the final
+  # TCP listener exists. This applies to every Postgres service below.
   users-postgres:
     image: postgres:17-alpine
     environment:
@@ -90,7 +93,7 @@ services:
     volumes:
       - users-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -122,7 +125,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       JWT_TTL: ${JWT_TTL:-24h}
-      BOOTSTRAP_SUPERUSER_EMAIL: ${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmindv.com}
+      BOOTSTRAP_SUPERUSER_EMAIL: ${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmindv.local}
       BOOTSTRAP_SUPERUSER_PASSWORD: ${BOOTSTRAP_SUPERUSER_PASSWORD:?set BOOTSTRAP_SUPERUSER_PASSWORD in .env}
       BOOTSTRAP_SUPERUSER_USERNAME: ${BOOTSTRAP_SUPERUSER_USERNAME:-superadmin}
       MEDIA_URL: http://media:8080
@@ -151,7 +154,7 @@ services:
     volumes:
       - entities-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U entities -d entities"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U entities -d entities"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -205,7 +208,7 @@ services:
     volumes:
       - tasks-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tasks -d tasks"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tasks -d tasks"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -244,6 +247,9 @@ services:
       KAFKA_OUTBOX_POLL_INTERVAL: ${KAFKA_OUTBOX_POLL_INTERVAL:-500ms}
       CODE_EXECUTION_TIME_LIMIT: ${CODE_EXECUTION_TIME_LIMIT:-1s}
       CODE_EXECUTION_MEMORY_LIMIT_BYTES: ${CODE_EXECUTION_MEMORY_LIMIT_BYTES:-67108864}
+      CODE_EXECUTION_MAX_ATTEMPTS: ${CODE_EXECUTION_MAX_ATTEMPTS:-3}
+      CODE_EXECUTION_RETRY_GRACE: ${CODE_EXECUTION_RETRY_GRACE:-2m}
+      CODE_EXECUTION_REAPER_INTERVAL: ${CODE_EXECUTION_REAPER_INTERVAL:-30s}
     depends_on:
       tasks-migrate:
         condition: service_completed_successfully
@@ -268,7 +274,7 @@ services:
     volumes:
       - feed-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U feed -d feed"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U feed -d feed"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -320,7 +326,11 @@ services:
 
   # sandbox — исполнитель кода (gojudge/fake): потребляет code-execution.requests.v1
   # из tasks, исполняет код по входным кейсам и публикует результат в results.v1.
+  # Профильный сервис: НЕ входит в дефолтный `make up` — он не нужен unit/integration-тестам,
+  # а его Go-сборка тяжёлая (важно на машинах с малым объёмом RAM). Без него programming-сабмиты
+  # остаются в статусе queued (verdict не выставляется). Поднять: `make up SANDBOX=1` или `make sandbox-up`.
   sandbox:
+    profiles: ["sandbox"]
     build:
       context: ../sandbox
       dockerfile: deployments/docker/Dockerfile.worker
@@ -386,7 +396,7 @@ services:
     volumes:
       - task-hunter-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U task_hunter -d task_hunter"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U task_hunter -d task_hunter"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -447,6 +457,22 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  recommendations:
+    build:
+      context: ../recommendations
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    environment:
+      HTTP_ADDRESS: ":8080"
+      RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ready >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
   api-gateway:
     build:
       context: ../api-gateway
@@ -470,6 +496,8 @@ services:
       FEED_URL: http://feed:8080
       FEED_TOKEN: ${FEED_GATEWAY_TOKEN:?set FEED_GATEWAY_TOKEN in .env}
       FEED_TIMEOUT: ${FEED_TIMEOUT:-10s}
+      RECOMMENDATIONS_URL: http://recommendations:8080
+      RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
@@ -487,6 +515,8 @@ services:
       media:
         condition: service_healthy
       feed:
+        condition: service_healthy
+      recommendations:
         condition: service_healthy
     ports:
       - "${API_GATEWAY_PORT:-8081}:8081"
@@ -526,7 +556,7 @@ services:
     volumes:
       - content-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U content -d content"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U content -d content"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -586,14 +616,14 @@ services:
     volumes:
       - media-postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U media -d media"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U media -d media"]
       interval: 2s
       timeout: 3s
       retries: 30
     restart: unless-stopped
 
   minio:
-    image: ${MINIO_IMAGE:-minio/minio:RELEASE.2025-04-22T22-12-26Z}
+    image: cgr.dev/chainguard/minio:latest
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
@@ -612,7 +642,7 @@ services:
     restart: unless-stopped
 
   media-buckets:
-    image: ${MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-04-16T18-13-26Z}
+    image: cgr.dev/chainguard/minio:latest
     platform: ${MEDIA_TOOL_PLATFORM:-linux/amd64}
     entrypoint: ["/bin/sh", "-c"]
     command:
