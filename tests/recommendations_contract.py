@@ -55,7 +55,9 @@ class Fixtures(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlparse(self.path).path
         status = 200
-        if path == f"/v1/topics/{TOPIC}":
+        if path == "/v1/topics":
+            body = [{"id": TOPIC, "title": "Synthetic topic", "status": "active"}]
+        elif path == f"/v1/topics/{TOPIC}":
             body = {"id": TOPIC, "title": "Synthetic topic", "status": "active"}
         elif path.endswith("/prerequisites"):
             body = []
@@ -194,10 +196,15 @@ def main():
                         actors_before = len(Fixtures.actors)
                         assert call(url, query=alias_query).get("errors"), "Alias fanout accepted"
                         assert len(Fixtures.actors) == actors_before, "Alias rejection fetched history"
+                        outline_query = '{ learningPlan(goal:"Junior AI",minutes:30,sessionCount:3) {aiStatus topics{id} materials{id} warnings} }'
+                        assert call(url, user=None, query=outline_query).get("errors"), "Unauthenticated outline allowed"
+                        outline = call(url, query=outline_query)
+                        assert not outline.get("errors"), "Outline contract failed"
+                        assert outline["data"]["learningPlan"]["aiStatus"] == "UNAVAILABLE", "Disabled AI invented plan"
                         cold = call(url)
                         assert not cold.get("errors"), "Cold-start GraphQL request failed: " + json.dumps(cold)
                         plan = cold["data"]["practicePlan"]
-                        assert plan["policyVersion"] == "practice-v2" and plan["items"], "Missing preview"
+                        assert plan["policyVersion"] == "practice-v3" and plan["items"], "Missing preview"
                         assert sum(x["estimatedMinutes"] for x in plan["items"]) == plan["totalMinutes"] <= 30
                         assert all(actor == USER for actor in Fixtures.actors), "Forged actor forwarded"
                         assert all(x["reasonCode"] == "START_TOPIC" for x in plan["items"])
