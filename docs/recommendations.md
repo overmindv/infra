@@ -26,6 +26,10 @@ make recommendations-contract
 Запуск локального стека остаётся `make up`. Railway этим изменением не создаётся
 и не настраивается. Оценка ресурсов: `../docs/architecture/recommendations.md`.
 
+HTTP-методы учебного профиля и целей описаны в `recommendations/api/openapi.yaml`.
+`ENTITIES_URL` указывает на внутренний сервис каталога. Если каталог недоступен,
+новые цели нельзя записать. Чтение и возврат сохраненного повтора работают без него.
+
 `recommendations-contract` собирает два Go binary и запускает их на локальных временных
 портах с synthetic upstream. Проверяет GraphQL/HTTP, actor isolation, бюджет, историю
 и безопасные отказы. Без БД проверяет preview. Если задана
