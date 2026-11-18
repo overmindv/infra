@@ -47,6 +47,9 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_EVENTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_DEADLETTER_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_MATERIAL_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_CONTRIBUTION_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_LEARNING_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CATALOG_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TASK_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
@@ -56,6 +59,9 @@ services:
       KAFKA_EVENTS_TOPIC: ${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}
       KAFKA_DEADLETTER_TOPIC: ${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}
       KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
       KAFKA_CATALOG_ACTIVITY_TOPIC: ${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}
       KAFKA_TASK_ACTIVITY_TOPIC: ${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
@@ -630,8 +636,13 @@ services:
       LOG_LEVEL: info
       DATABASE_URL: "postgres://content:${CONTENT_POSTGRES_PASSWORD}@content-postgres:5432/content?sslmode=disable"
       GRPC_ADDR: ":9090"
+      CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:-}
       KAFKA_ENABLED: ${CONTENT_KAFKA_ENABLED:-true}
       KAFKA_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      CONTENT_ACTIVITY_ENABLED: ${CONTENT_ACTIVITY_ENABLED:-true}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       content-migrate:
