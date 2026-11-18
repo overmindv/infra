@@ -183,6 +183,7 @@ services:
       HTTP_ADDR: ":8080"
       ENV: local
       LOG_LEVEL: info
+      ENTITIES_SNAPSHOT_TOKEN: "${ENTITIES_SNAPSHOT_TOKEN:-}"
       DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
     depends_on:
       entities-migrate:
