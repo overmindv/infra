@@ -586,6 +586,7 @@ services:
       context: ../frontend
       args:
         VITE_API_URL: /graphql
+        VITE_MEDIA_DOWNLOAD_ORIGINS: ${VITE_MEDIA_DOWNLOAD_ORIGINS:-http://localhost:${MINIO_API_PORT:-9000}}
     depends_on:
       api-gateway:
         condition: service_healthy
