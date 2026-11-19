@@ -90,6 +90,10 @@ Compose создает отдельный топик `learning.outcome.v1` дл�
 данных задай `TASKS_LEARNING_OUTCOMES_ENABLED=true`. В общей среде сначала
 настрой права: запись только Tasks, чтение только Recommendations.
 
+Для локального приема включи `RECOMMENDATIONS_LEARNING_EVIDENCE_ENABLED=true`.
+Recommendations читает `learning.outcome.v1` и тот же
+`KAFKA_CONTENT_LEARNING_TOPIC`, который настроен у Content.
+
 ## Опциональный Telegram
 
 Telegram-сбор в `task-hunter` по умолчанию выключен. Это позволяет запускать весь основной стек без внешнего аккаунта и MTProto session. API управления очередью и сбор задач по публичным website URL при этом работают.

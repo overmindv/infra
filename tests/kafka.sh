@@ -21,6 +21,7 @@ env_value() {
 
 requests_topic="$(env_value KAFKA_REQUESTS_TOPIC code-execution.requests.v1)"
 results_topic="$(env_value KAFKA_RESULTS_TOPIC code-execution.results.v1)"
+content_learning_topic="$(env_value KAFKA_CONTENT_LEARNING_TOPIC content.learning.v1)"
 check_topic="infra.kafka-check.$(date +%s).$$"
 check_message="kafka-check-$(date +%s)-$$"
 
@@ -33,7 +34,7 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-for topic in "$requests_topic" "$results_topic" learning.outcome.v1; do
+for topic in "$requests_topic" "$results_topic" learning.outcome.v1 "$content_learning_topic"; do
   docker compose --env-file "$ENV_FILE" -f "$ROOT/docker-compose.yml" exec -T kafka \
     /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic "$topic" \
     >/dev/null
