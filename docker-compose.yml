@@ -52,6 +52,7 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_LEARNING_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CATALOG_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TASK_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic learning.outcome.v1 --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
@@ -248,6 +249,7 @@ services:
       WRITE_TIMEOUT: ${TASKS_WRITE_TIMEOUT:-20s}
       TASK_HUNTER_INGEST_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
       TASKS_RESOURCE_TOKEN: "${TASKS_RESOURCE_TOKEN:-}"
+      TASKS_LEARNING_OUTCOMES_ENABLED: "${TASKS_LEARNING_OUTCOMES_ENABLED:-false}"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}

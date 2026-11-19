@@ -85,6 +85,11 @@ docker compose --env-file .env -f docker-compose.yml --profile gojudge up -d --b
 
 Локальные listeners используют `PLAINTEXT` и предназначены только для разработки.
 
+Compose создает отдельный топик `learning.outcome.v1` для оцененных решений.
+По умолчанию Tasks не пишет в него. Для локальной проверки на синтетических
+данных задай `TASKS_LEARNING_OUTCOMES_ENABLED=true`. В общей среде сначала
+настрой права: запись только Tasks, чтение только Recommendations.
+
 ## Опциональный Telegram
 
 Telegram-сбор в `task-hunter` по умолчанию выключен. Это позволяет запускать весь основной стек без внешнего аккаунта и MTProto session. API управления очередью и сбор задач по публичным website URL при этом работают.
