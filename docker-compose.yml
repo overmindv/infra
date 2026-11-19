@@ -47,6 +47,9 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_EVENTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_DEADLETTER_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_MATERIAL_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_CONTRIBUTION_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_LEARNING_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CATALOG_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TASK_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
     environment:
@@ -56,6 +59,9 @@ services:
       KAFKA_EVENTS_TOPIC: ${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}
       KAFKA_DEADLETTER_TOPIC: ${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}
       KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
       KAFKA_CATALOG_ACTIVITY_TOPIC: ${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}
       KAFKA_TASK_ACTIVITY_TOPIC: ${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
@@ -241,6 +247,7 @@ services:
       READ_TIMEOUT: ${TASKS_READ_TIMEOUT:-10s}
       WRITE_TIMEOUT: ${TASKS_WRITE_TIMEOUT:-20s}
       TASK_HUNTER_INGEST_TOKEN: ${TASK_HUNTER_INGEST_TOKEN:?set TASK_HUNTER_INGEST_TOKEN in .env}
+      TASKS_RESOURCE_TOKEN: "${TASKS_RESOURCE_TOKEN:-}"
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
@@ -500,6 +507,13 @@ services:
       WRITE_TIMEOUT: 35s
       ENTITIES_URL: http://entities:8080
       ENTITIES_SNAPSHOT_TOKEN: "${ENTITIES_SNAPSHOT_TOKEN:-}"
+      RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED: "${RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED:-false}"
+      TASKS_RESOURCE_URL: http://tasks:8080
+      TASKS_RESOURCE_TOKEN: "${TASKS_RESOURCE_TOKEN:-}"
+      CONTENT_CATALOG_ADDRESS: content:9090
+      CONTENT_GRPC_CATALOG_TOKEN: "${CONTENT_GRPC_CATALOG_TOKEN:-}"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
       AI_ENABLED: ${AI_ENABLED:-false}
       AI_FREE_TIER_CONFIRMED: ${AI_FREE_TIER_CONFIRMED:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
@@ -544,6 +558,10 @@ services:
       FEED_TIMEOUT: ${FEED_TIMEOUT:-10s}
       RECOMMENDATIONS_URL: http://recommendations:8080
       RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
+      CONTENT_GRPC_ADDR: ${CONTENT_GRPC_SERVICE_TOKEN:+content:9090}
+      CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:-}
+      CONTENT_GRPC_INSECURE: "true"
+      CONTENT_GRPC_TIMEOUT: ${CONTENT_GRPC_TIMEOUT:-3s}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-users}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-}
@@ -579,6 +597,7 @@ services:
       context: ../frontend
       args:
         VITE_API_URL: /graphql
+        VITE_MEDIA_DOWNLOAD_ORIGINS: ${VITE_MEDIA_DOWNLOAD_ORIGINS:-http://localhost:${MINIO_API_PORT:-9000}}
     depends_on:
       api-gateway:
         condition: service_healthy
@@ -633,8 +652,17 @@ services:
       LOG_LEVEL: info
       DATABASE_URL: "postgres://content:${CONTENT_POSTGRES_PASSWORD}@content-postgres:5432/content?sslmode=disable"
       GRPC_ADDR: ":9090"
+      CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:-}
+      CONTENT_GRPC_CATALOG_TOKEN: "${CONTENT_GRPC_CATALOG_TOKEN:-}"
+      CONTENT_GRPC_MODERATION_TOKEN: ${CONTENT_GRPC_MODERATION_TOKEN:-}
+      CONTENT_MEDIA_URL: ${MEDIA_CONTENT_TOKEN:+http://media:8080}
+      CONTENT_MEDIA_TOKEN: ${MEDIA_CONTENT_TOKEN:-}
       KAFKA_ENABLED: ${CONTENT_KAFKA_ENABLED:-true}
       KAFKA_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      CONTENT_ACTIVITY_ENABLED: ${CONTENT_ACTIVITY_ENABLED:-true}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       content-migrate:
@@ -642,7 +670,7 @@ services:
       kafka-topics:
         condition: service_completed_successfully
     ports:
-      - "${CONTENT_GRPC_PORT:-9090}:9090"
+      - "127.0.0.1:${CONTENT_GRPC_PORT:-9090}:9090"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null"]
       interval: 5s
@@ -749,6 +777,7 @@ services:
       ENV: local
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:-${MEDIA_INTERNAL_TOKEN}}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:-${MEDIA_INTERNAL_TOKEN}-users}
+      MEDIA_CONTENT_TOKEN: ${MEDIA_CONTENT_TOKEN:-}
       MEDIA_S3_REGION: us-east-1
       MEDIA_S3_ENDPOINT: http://minio:9000
       MEDIA_S3_PUBLIC_ENDPOINT: http://localhost:${MINIO_API_PORT:-9000}
