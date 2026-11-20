@@ -146,7 +146,8 @@ python3 scripts/production_compose.py runner check --manifest /etc/overmindv/rel
 # Application VM
 python3 scripts/production_compose.py app check \
   --manifest /etc/overmindv/release.json --env-file /etc/overmindv/app.env \
-  --sandbox-migration /etc/overmindv/001_init_runs.sql
+  --sandbox-migration /etc/overmindv/001_init_runs.sql \
+  --runner-tls-dir /etc/overmindv/worker-tls
 ```
 
 `check` не печатает конфигурацию и не запускает контейнеры. Для запуска на готовом
@@ -208,4 +209,52 @@ origin веб-сайта. Host и query подписанных запросов 
 
 ```bash
 python3 tests/public_edge_smoke.py
+```
+
+## Приватный TLS до runner
+
+На runner используем [отдельный Caddyfile](../deploy/caddy/runner.Caddyfile).
+Этот Caddy слушает только частный IP на TCP 8443, без HTTP и публичного ACME.
+В firewall разрешаем этот порт только с частного IP узла приложения. Caddy
+проверяет тот же IP соединения, клиентский сертификат и путь запроса. Разрешены
+`GET /version` и `POST /run`. Оба уходят на локальный `127.0.0.1:15050`.
+
+Передаем Caddy на runner отдельный `EnvironmentFile` через systemd:
+
+```dotenv
+RUNNER_TLS_HOST=runner.internal
+RUNNER_BIND_IP=10.70.0.20
+RUNNER_APP_IP=10.70.0.10
+```
+
+Имена и IP здесь пример. DNS `RUNNER_TLS_HOST` должен резолвиться в частный
+адрес runner. В `app.env` указываем `SANDBOX_GOJUDGE_BASE_URL=https://runner.internal:8443`.
+
+Используем выделенные CA для сервера runner и клиентов worker. Закрытые ключи
+CA не размещаем на этих VM. Сертификат runner должен иметь SAN с именем
+`RUNNER_TLS_HOST` и назначение `serverAuth`. Сертификат worker выпускаем с
+`clientAuth`.
+
+| Узел | Файлы | Доступ |
+| --- | --- | --- |
+| Runner | `/etc/overmindv/runner-tls/server.pem`, `server-key.pem`, `worker-ca.pem` | Каталог `root:caddy` с `0750`, файлы `root:caddy` с `0640`; go-judge их не получает |
+| Приложение | `/etc/overmindv/worker-tls/runner-ca.pem`, `worker.pem`, `worker-key.pem` | Каталог `root:10001` с `0750`, файлы `root:10001` с `0640`; read-only mount только в worker |
+
+Родительский каталог `/etc/overmindv` на узле приложения ограничиваем для
+обычных пользователей. В `release.json` нужен образ Sandbox с коммитом
+[`273583c`](https://github.com/overmindv/sandbox/commit/273583c7a27edbac47a6906e44b7164c0a4b6b1c)
+или последующей версией с поддержкой `SANDBOX_GOJUDGE_TLS_*_FILE`.
+Worker проверяет CA и имя сервера перед отправкой данных задачи. В
+runner-контейнере нет ключа worker, доступа к БД или S3.
+
+При ротации CA сначала добавляем новый CA в доверенный набор на принимающей
+стороне, затем обновляем сертификат и ключ на отправляющей. Перезапускаем Caddy
+после смены его ключа или доверенных CA, worker после обновления его файлов.
+Старый CA убираем после проверки `/version` и контрольного запуска. Полная
+проверка firewall и маршрута между VM остается частью приемки.
+
+Локальный тест требует Docker и OpenSSL, создает временные сертификаты:
+
+```bash
+python3 tests/runner_edge_smoke.py
 ```

@@ -299,6 +299,7 @@ services:
     build: !reset null
     image: ${RELEASE_SANDBOX_IMAGE:?release manifest required}
     ports: !reset []
+    user: "10001:10001"
     environment:
       SANDBOX_ENV: prod
       SANDBOX_CONFIG_FILE: configs/prod.yaml
@@ -308,6 +309,9 @@ services:
       SANDBOX_FEATURE_FAKE_EXECUTOR: "false"
       SANDBOX_FEATURE_GOJUDGE_EXECUTOR: "true"
       SANDBOX_GOJUDGE_BASE_URL: ${SANDBOX_GOJUDGE_BASE_URL:?private HTTPS runner endpoint required}
+      SANDBOX_GOJUDGE_TLS_CA_FILE: /run/sandbox/gojudge-tls/runner-ca.pem
+      SANDBOX_GOJUDGE_TLS_CERT_FILE: /run/sandbox/gojudge-tls/worker.pem
+      SANDBOX_GOJUDGE_TLS_KEY_FILE: /run/sandbox/gojudge-tls/worker-key.pem
       SANDBOX_STORAGE_TYPE: postgres
       SANDBOX_MAX_IN_FLIGHT: "1"
       SANDBOX_PYTHON_MAX_IN_FLIGHT: "1"
@@ -325,6 +329,13 @@ services:
       SANDBOX_ARTIFACTS_FORCE_PATH_STYLE: "true"
       SANDBOX_ARTIFACTS_ACCESS_KEY_ID: ${SANDBOX_ARTIFACTS_ACCESS_KEY_ID:?limited artifacts access key required}
       SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY: ${SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY:?limited artifacts secret key required}
+    volumes:
+      - type: bind
+        source: ${RELEASE_RUNNER_TLS_DIR:?worker TLS directory required}
+        target: /run/sandbox/gojudge-tls
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       sandbox-migrate:
         condition: service_completed_successfully

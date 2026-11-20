@@ -1,0 +1,46 @@
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 5s
+			idle 1m
+		}
+	}
+	log {
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+https://{$RUNNER_TLS_HOST}:8443 {
+	bind {$RUNNER_BIND_IP}
+	tls /etc/overmindv/runner-tls/server.pem /etc/overmindv/runner-tls/server-key.pem {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/overmindv/runner-tls/worker-ca.pem
+		}
+	}
+
+	@foreign_peer not remote_ip {$RUNNER_APP_IP}/32
+	@version {
+		method GET
+		path /version
+	}
+	@run {
+		method POST
+		path /run
+	}
+	route {
+		respond @foreign_peer 403
+		reverse_proxy @version 127.0.0.1:15050
+		reverse_proxy @run 127.0.0.1:15050
+		respond 404
+	}
+}

@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -38,6 +39,12 @@ PORTS = {
     "runner": {"gojudge": (15050, 5050)},
 }
 MIGRATION = "migrations/001_init_runs.sql"
+RUNNER_TLS_PATH = "/run/sandbox/gojudge-tls"
+RUNNER_TLS_FILES = {
+    "SANDBOX_GOJUDGE_TLS_CA_FILE": "runner-ca.pem",
+    "SANDBOX_GOJUDGE_TLS_CERT_FILE": "worker.pem",
+    "SANDBOX_GOJUDGE_TLS_KEY_FILE": "worker-key.pem",
+}
 
 
 def image_env(manifest, target):
@@ -62,6 +69,25 @@ def check_migration(manifest, path):
         raise ValueError("unsupported Sandbox migration set")
     if hashlib.sha256(path.read_bytes()).hexdigest() != migrations[0]["sha256"]:
         raise ValueError("Sandbox migration does not match the release checksum")
+
+
+def check_runner_tls_files(directory, production=False):
+    if {file.name for file in directory.iterdir()} != set(RUNNER_TLS_FILES.values()):
+        raise ValueError("worker TLS directory must contain only runner-ca.pem, worker.pem and worker-key.pem")
+    if production and os.name != "posix":
+        raise ValueError("apply production TLS permissions on the Linux application VM")
+    if production:
+        metadata = directory.stat()
+        if metadata.st_uid != 0 or metadata.st_gid != 10001 or stat.S_IMODE(metadata.st_mode) != 0o750:
+            raise ValueError("worker TLS directory must be root:10001 with mode 0750")
+    for name in RUNNER_TLS_FILES.values():
+        file = directory / name
+        metadata = file.lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not metadata.st_size:
+            raise ValueError(f"{name}: expected a nonempty regular PEM file")
+        if production and (metadata.st_uid != 0 or metadata.st_gid != 10001
+                           or stat.S_IMODE(metadata.st_mode) != 0o640):
+            raise ValueError(f"{name}: expected root:10001 with mode 0640")
 
 
 def https_url(value, origin_only=False):
@@ -93,7 +119,7 @@ def check_public_edge(network, gateway, object_origin):
         raise ValueError("expected one HTTPS frontend origin distinct from object storage")
 
 
-def check_model(model, target, images, migration=None):
+def check_model(model, target, images, migration=None, runner_tls=None):
     project = PROJECTS[target]
     services = model["services"]
     expected = APP_IMAGES if target == "app" else {"gojudge": "gojudge"}
@@ -108,6 +134,8 @@ def check_model(model, target, images, migration=None):
         if (volume["name"] != f"{project}_{name}" or volume.get("external") or volume.get("driver_opts")):
             raise ValueError(f"{name}: data volume must belong to the production project")
 
+    mounts = {"sandbox-migrate": (migration, "/app/001_init_runs.sql"),
+              "sandbox": (runner_tls, RUNNER_TLS_PATH)}
     for name, service in services.items():
         if service["image"] != images[expected[name]] or service["platform"] != "linux/amd64":
             raise ValueError(f"{name}: image does not match the release")
@@ -137,13 +165,13 @@ def check_model(model, target, images, migration=None):
 
         if "no-new-privileges:true" not in service["security_opt"]:
             raise ValueError(f"{name}: no-new-privileges is missing")
-        for volume in service.get("volumes", []):
-            if volume["type"] != "volume" and not (
-                name == "sandbox-migrate" and volume["type"] == "bind" and volume.get("read_only")
-                and Path(volume["source"]).resolve() == migration
-                and volume["target"] == "/app/001_init_runs.sql"
-            ):
-                raise ValueError(f"{name}: unexpected host mount")
+        files = [volume for volume in service.get("volumes", []) if volume["type"] != "volume"]
+        expected_mount = mounts.get(name)
+        if len(files) != int(expected_mount is not None) or any(
+            volume["type"] != "bind" or not volume.get("read_only") or volume["bind"].get("create_host_path")
+            or (Path(volume["source"]).resolve(), volume["target"]) != expected_mount for volume in files
+        ):
+            raise ValueError(f"{name}: unexpected host mount")
         if any("__GENERATE__" in str(value) for value in service.get("environment", {}).values()):
             raise ValueError(f"{name}: local secret placeholder in the configuration")
 
@@ -157,11 +185,17 @@ def check_model(model, target, images, migration=None):
     if "@" not in email or email.endswith((".local", ".invalid", ".test", ".example")):
         raise ValueError("users: expected an explicit administrator email")
     sandbox = services["sandbox"]["environment"]
+    if services["sandbox"]["user"] != "10001:10001" or any(
+        sandbox.get(key) != f"{RUNNER_TLS_PATH}/{file}" for key, file in RUNNER_TLS_FILES.items()
+    ):
+        raise ValueError("sandbox: expected worker TLS files on the private read-only mount")
     media = services["media"]["environment"]
     if not (https_url(sandbox["SANDBOX_GOJUDGE_BASE_URL"], origin_only=True)
             and https_url(media["MEDIA_S3_PUBLIC_ENDPOINT"], origin_only=True)
             and https_url(media["MEDIA_PUBLIC_BASE_URL"])):
         raise ValueError("expected HTTPS URLs for the runner, media and frontend")
+    if urlsplit(sandbox["SANDBOX_GOJUDGE_BASE_URL"]).port != 8443:
+        raise ValueError("runner: expected the private TLS proxy on port 8443")
     check_public_edge(network, services["api-gateway"]["environment"], media["MEDIA_S3_PUBLIC_ENDPOINT"])
     keys = {
         services["minio"]["environment"]["MINIO_ROOT_USER"],
@@ -186,7 +220,7 @@ def compose_args(target, env_file):
     return args
 
 
-def compose_env(images, migration=None):
+def compose_env(images, migration=None, runner_tls=None):
     environment = {
         key: value for key, value in os.environ.items()
         if key.upper().startswith("DOCKER_") or key.upper() in (
@@ -200,6 +234,8 @@ def compose_env(images, migration=None):
                         for name, value in images.items()})
     if migration is not None:
         environment["RELEASE_SANDBOX_MIGRATION"] = str(migration)
+    if runner_tls is not None:
+        environment["RELEASE_RUNNER_TLS_DIR"] = str(runner_tls)
     return environment
 
 
@@ -233,10 +269,12 @@ def main():
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--sandbox-migration", type=Path)
+    parser.add_argument("--runner-tls-dir", type=Path)
     args = parser.parse_args()
-    if args.target == "app" and (not args.env_file or not args.sandbox_migration):
-        parser.error("app requires --env-file and --sandbox-migration")
-    if args.target == "runner" and (args.env_file or args.sandbox_migration):
+    app_files = (args.env_file, args.sandbox_migration, args.runner_tls_dir)
+    if args.target == "app" and not all(app_files):
+        parser.error("app requires --env-file, --sandbox-migration and --runner-tls-dir")
+    if args.target == "runner" and any(app_files):
         parser.error("runner does not accept application files")
 
     try:
@@ -244,14 +282,17 @@ def main():
             manifest = json.load(file)
         images = image_env(manifest, args.target)
         migration = None
+        runner_tls = None
         env_file = None
         if args.target == "app":
             env_file = args.env_file.resolve(strict=True)
             migration = args.sandbox_migration.resolve(strict=True)
             check_migration(manifest, migration)
-        environment = compose_env(images, migration)
+            runner_tls = args.runner_tls_dir.resolve(strict=True)
+            check_runner_tls_files(runner_tls, production=args.action == "up")
+        environment = compose_env(images, migration, runner_tls)
         compose = compose_args(args.target, env_file)
-        check_model(check_compose(compose, environment), args.target, images, migration)
+        check_model(check_compose(compose, environment), args.target, images, migration, runner_tls)
         if args.action == "up":
             check_host(args.target, environment)
             subprocess.run([*compose, "up", "-d", "--no-build"], check=True, cwd=ROOT, env=environment)
