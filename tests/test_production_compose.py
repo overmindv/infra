@@ -57,6 +57,7 @@ class ProductionComposeTest(unittest.TestCase):
             "MEDIA_INTERNAL_TOKEN=",
             "MEDIA_ALLOW_UNSCANNED_LOCAL=true",
             "MEDIA_ENABLE_UPLOAD_CLEANUP=true",
+            "MEDIA_MAX_MULTIPART_SESSIONS=6",
             "MINIO_ROOT_USER=fixture-root",
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
@@ -113,6 +114,11 @@ class ProductionComposeTest(unittest.TestCase):
         model["services"]["media"]["environment"]["MEDIA_ENABLE_UPLOAD_CLEANUP"] = "true"
         with self.assertRaisesRegex(ValueError, "approved retention"):
             self.check_app(model)
+
+    def test_media_multipart_limit_can_be_configured(self):
+        self.assertEqual(
+            self.model["app"]["services"]["media"]["environment"]["MEDIA_MAX_MULTIPART_SESSIONS"], "6"
+        )
 
     def test_media_anonymous_policy_cannot_cover_originals(self):
         data = json.loads(deploy.PUBLIC_MEDIA_POLICY.read_text(encoding="utf-8"))
