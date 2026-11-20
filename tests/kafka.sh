@@ -33,7 +33,7 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-for topic in "$requests_topic" "$results_topic"; do
+for topic in "$requests_topic" "$results_topic" learning.outcome.v1; do
   docker compose --env-file "$ENV_FILE" -f "$ROOT/docker-compose.yml" exec -T kafka \
     /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic "$topic" \
     >/dev/null
