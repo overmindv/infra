@@ -113,6 +113,9 @@ lint:
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
 	@sh -n scripts/*.sh tests/integration.sh
 	@sh -n tests/kafka.sh
+	@sh -n scripts/kafka/topics.sh
+	@sh -n tests/kafka-acl-live.sh
+	@sh tests/kafka-topics-plan.sh
 
 # Запуск тестов сервисов
 test: lint

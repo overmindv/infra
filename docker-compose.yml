@@ -37,18 +37,10 @@ services:
 
   kafka-topics:
     image: ${KAFKA_IMAGE:-apache/kafka:4.3.1}
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_REQUESTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_RESULTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_RETRY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_EVENTS_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_DEADLETTER_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CONTENT_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_CATALOG_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic "$${KAFKA_TASK_ACTIVITY_TOPIC}" --partitions "$${KAFKA_TOPIC_PARTITIONS}" --replication-factor 1 --config "retention.ms=$${KAFKA_RETENTION_MS}"
+    entrypoint: ["/bin/sh", "/opt/overmind/kafka/topics.sh"]
+    command: ["local", "kafka:9092"]
+    volumes:
+      - ./scripts/kafka:/opt/overmind/kafka:ro
     environment:
       KAFKA_REQUESTS_TOPIC: ${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}
       KAFKA_RESULTS_TOPIC: ${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}
@@ -58,8 +50,17 @@ services:
       KAFKA_CONTENT_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
       KAFKA_CATALOG_ACTIVITY_TOPIC: ${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}
       KAFKA_TASK_ACTIVITY_TOPIC: ${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
+      KAFKA_RESULTS_CONSUMER_GROUP: ${KAFKA_RESULTS_CONSUMER_GROUP:-tasks-code-results-v1}
+      SANDBOX_KAFKA_GROUP_ID: ${SANDBOX_KAFKA_GROUP_ID:-sandbox-code-execution-v1}
+      FEED_CONSUMER_GROUP: ${FEED_CONSUMER_GROUP:-feed-v1}
       KAFKA_TOPIC_PARTITIONS: ${KAFKA_TOPIC_PARTITIONS:-3}
       KAFKA_RETENTION_MS: ${KAFKA_RETENTION_MS:-604800000}
+      KAFKA_EXECUTION_MAX_BATCH_BYTES: ${KAFKA_EXECUTION_MAX_BATCH_BYTES:-3145728}
+      KAFKA_METADATA_MAX_BATCH_BYTES: ${KAFKA_METADATA_MAX_BATCH_BYTES:-262144}
+      KAFKA_RESERVE_EXECUTION_V2: ${KAFKA_RESERVE_EXECUTION_V2:-false}
     depends_on:
       kafka:
         condition: service_healthy
@@ -494,6 +495,8 @@ services:
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
     environment:
       HTTP_ADDRESS: ":8080"
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
       DATABASE_URL: "postgres://recommendations:${RECOMMENDATIONS_POSTGRES_PASSWORD}@recommendations-postgres:5432/recommendations?sslmode=disable"
       RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
       WRITE_TIMEOUT: 35s
@@ -632,6 +635,9 @@ services:
       GRPC_ADDR: ":9090"
       KAFKA_ENABLED: ${CONTENT_KAFKA_ENABLED:-true}
       KAFKA_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
+      KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
+      KAFKA_CONTENT_LEARNING_TOPIC: ${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}
+      KAFKA_CONTENT_CONTRIBUTION_TOPIC: ${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       content-migrate:
