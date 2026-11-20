@@ -3,4 +3,3 @@
 SERVICES="frontend api-gateway users entities tasks task-hunter recommendations"
 REGISTRY="${IMAGE_REGISTRY:-overmindv}"
 LOCAL_TAG="${IMAGE_TAG:-local}"
-LATEST_TAG="${IMAGE_TAG:-latest}"

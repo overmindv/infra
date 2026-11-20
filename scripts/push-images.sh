@@ -2,13 +2,10 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-cd "$ROOT"
 
-. "$ROOT/scripts/lib.sh"
+: "${RELEASE_BUILD:?RELEASE_BUILD must point to the build receipt}"
+: "${RELEASE_MANIFEST:?RELEASE_MANIFEST must be a new output file}"
 
-: "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
-
-for svc in $SERVICES; do
-  docker push "${IMAGE_REGISTRY}/${svc}:${LATEST_TAG}"
-done
+exec "${PYTHON:-python3}" "$ROOT/scripts/release_manifest.py" publish \
+  --build "$RELEASE_BUILD" --output "$RELEASE_MANIFEST"
 

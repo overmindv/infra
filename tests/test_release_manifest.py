@@ -1,0 +1,195 @@
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+
+import release_manifest as release
+from release_sources import archive, git, pin_dockerfile
+
+
+DIGEST = "sha256:" + "a" * 64
+PUSHED_DIGEST = "sha256:" + "b" * 64
+BASE = "alpine:ovm165-missing-tag"
+
+
+class ReleaseTest(unittest.TestCase):
+    def setUp(self):
+        work = tempfile.TemporaryDirectory()
+        self.addCleanup(work.cleanup)
+        self.workspace = Path(work.name)
+        self.repositories = {"infra", "users"}
+        self.catalog = {"users": ("users", "Dockerfile")}
+        for attr, value in {
+            "REPOS": self.repositories, "DOCKERFILES": self.catalog, "UPSTREAM": {},
+        }.items():
+            mock = patch.object(release, attr, value)
+            mock.start()
+            self.addCleanup(mock.stop)
+
+        self.sources = {}
+        self.repo = self.workspace / "users"
+        for name in self.repositories:
+            repo = self.workspace / name
+            repo.mkdir()
+            git(repo, "init", "-q")
+            git(repo, "config", "user.email", "example@example.invalid")
+            git(repo, "config", "user.name", "Release test")
+            git(repo, "config", "core.autocrlf", "false")
+            git(repo, "config", "commit.gpgsign", "false")
+            git(repo, "remote", "add", "origin", f"https://github.com/overmindv/{name}.git")
+            (repo / "source.txt").write_bytes(b"committed\n")
+            if name == "users":
+                (repo / "Dockerfile").write_bytes(
+                    f"ARG BASE={BASE}\nFROM ${{BASE}}\nCOPY . /payload\n".encode()
+                )
+                migration = repo / "migrations" / "001_init.sql"
+                migration.parent.mkdir()
+                migration.write_bytes(b"SELECT 1;\n")
+                schema = repo / "api" / "user.v1.json"
+                schema.parent.mkdir()
+                schema.write_text(json.dumps({
+                    "$id": "user.v1",
+                    "properties": {"schema_version": {"const": 1}},
+                }), encoding="utf-8")
+            git(repo, "add", ".")
+            git(repo, "commit", "-qm", "Source fixture")
+            sha = git(repo, "rev-parse", "HEAD").decode().strip()
+            git(repo, "update-ref", "refs/remotes/origin/main", sha)
+            self.sources[name] = sha
+        (self.repo / "source.txt").write_bytes(b"dirty\n")
+        (self.repo / ".env").write_bytes(b"FIXTURE_ONLY=untracked\n")
+
+    def plan(self, pins=None, registry="example.invalid/overmindv"):
+        return release.make_plan(self.workspace, self.sources,
+                                 {BASE: DIGEST} if pins is None else pins,
+                                 registry, "v1")
+
+    def test_reads_only_committed_sources(self):
+        plan = self.plan()
+        migrations = plan["metadata"]["users"]["migrations"]
+        self.assertEqual(migrations, [{
+            "path": "migrations/001_init.sql", "version": "001",
+            "sha256": hashlib.sha256(b"SELECT 1;\n").hexdigest(),
+        }])
+        schema, = plan["metadata"]["users"]["schemas"]
+        self.assertEqual((schema["schema_id"], schema["version"]), ("user.v1", 1))
+        self.assertEqual(plan["images"]["users"]["bases"], {BASE: f"alpine@{DIGEST}"})
+        git(self.repo, "config", "core.autocrlf", "true")
+        destination = self.workspace / "clean"
+        archive(self.repo, self.sources["users"], destination)
+        self.assertEqual((destination / "source.txt").read_bytes(), b"committed\n")
+        self.assertFalse((destination / ".env").exists())
+        self.assertEqual((self.repo / "source.txt").read_bytes(), b"dirty\n")
+
+    def test_rejects_short_sha_and_unpushed_commit(self):
+        git(self.repo, "add", "source.txt")
+        git(self.repo, "commit", "-qm", "Unpublished fixture")
+        sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
+        self.sources["users"] = sha[:10]
+        with self.assertRaisesRegex(ValueError, "full lowercase commit SHA"):
+            self.plan()
+        self.sources["users"] = sha
+        with self.assertRaisesRegex(ValueError, "not in a fetched origin branch"):
+            self.plan()
+
+    def test_rejects_wrong_origin_and_local_attributes(self):
+        (self.repo / ".git/info/attributes").write_bytes(b"source.txt export-ignore\n")
+        with self.assertRaisesRegex(ValueError, "local info/attributes"):
+            self.plan()
+        git(self.repo, "remote", "set-url", "origin", "https://github.com/example/users")
+        with self.assertRaisesRegex(ValueError, "origin must point to"):
+            self.plan()
+
+    def test_requires_base_and_runtime_pins(self):
+        with self.assertRaisesRegex(ValueError, "missing or invalid digest for alpine"):
+            self.plan({})
+        with patch.object(release, "UPSTREAM", {"postgres": "postgres:17-alpine"}):
+            with self.assertRaisesRegex(ValueError, "missing or invalid digest for postgres"):
+                self.plan()
+
+    def test_rejects_changed_plan_before_docker(self):
+        plan = self.plan()
+        plan["metadata"]["users"]["migrations"].clear()
+        with self.assertRaisesRegex(ValueError, "does not match the pinned source trees"):
+            release.build(self.workspace, plan)
+
+    def test_publish_refuses_replaced_image_before_tagging(self):
+        receipt = {"plan": self.plan(), "local_images": {"users": DIGEST}}
+        with patch.object(release, "inspect", return_value=PUSHED_DIGEST):
+            with patch("subprocess.run") as run:
+                with self.assertRaisesRegex(ValueError, "does not match build receipt"):
+                    release.publish(receipt)
+                run.assert_not_called()
+
+    def test_publish_returns_distribution_digest_not_local_id(self):
+        receipt = {"plan": self.plan(), "local_images": {"users": DIGEST}}
+        tag = f"rel-v1-{'a' * 64}"
+        with (
+            patch.object(release, "inspect", return_value=DIGEST),
+            patch("subprocess.run") as run,
+            patch("subprocess.check_output", return_value=(
+                f"{tag}: digest: {PUSHED_DIGEST} size: 42\n"
+            )) as push,
+            patch("builtins.print"),
+        ):
+            result = release.publish(receipt)
+        repo = "example.invalid/overmindv/users"
+        run.assert_called_once_with(
+            ["docker", "image", "tag", DIGEST, f"{repo}:{tag}"], check=True
+        )
+        push.assert_called_once_with(
+            ["docker", "image", "push", f"{repo}:{tag}"], text=True
+        )
+        self.assertEqual(result["images"], {"users": f"{repo}@{PUSHED_DIGEST}"})
+
+    @unittest.skipUnless(os.getenv("RELEASE_TEST_BASE_DIGEST"), "needs Docker and an Alpine pin")
+    def test_build_from_pinned_archive_with_docker(self):
+        registry = os.getenv("RELEASE_TEST_REGISTRY")
+        plan = self.plan({BASE: os.environ["RELEASE_TEST_BASE_DIGEST"]},
+                         registry=registry or "example.invalid/overmindv")
+        receipt = release.build(self.workspace, plan)
+        image = receipt["local_images"]["users"]
+        if registry:
+            published = release.publish(receipt)
+            image = published["images"]["users"]
+            subprocess.run(["docker", "pull", image], check=True)
+        subprocess.run([
+            "docker", "run", "--rm", "--network", "none", "--entrypoint", "/bin/sh",
+            image, "-ec", 'test "$(cat /payload/source.txt)" = committed; '
+            "test ! -e /payload/.env",
+        ], check=True)
+
+
+class DockerfileTest(unittest.TestCase):
+    def test_preserves_stage_references_and_replaces_argument_base(self):
+        spec = (
+            "ARG VERSION=3.22\nFROM\\\n alpine:${VERSION} AS build\n"
+            "FROM build AS api\n"
+            "COPY --from=build /source /target\nFROM api\n"
+        )
+        pinned, bases = pin_dockerfile(spec, {"alpine:3.22": DIGEST})
+        self.assertIn(f"FROM alpine@{DIGEST} AS build\n", pinned)
+        self.assertIn("FROM build AS api\n", pinned)
+        self.assertIn("COPY --from=build /source /target\n", pinned)
+        self.assertEqual(bases, {"alpine:3.22": f"alpine@{DIGEST}"})
+
+    def test_rejects_hidden_external_image_sources(self):
+        for spec in (
+            "# syntax=docker/dockerfile:latest\nFROM scratch\n",
+            "FROM scratch\nCOPY --from=alpine /x /y\n",
+            "FROM scratch\nRUN --mount=type=bind,from=alpine,target=/x true\n",
+            "FROM scratch\nADD https://example.invalid/foo /foo\n",
+        ):
+            with self.subTest(spec=spec), self.assertRaises(ValueError):
+                pin_dockerfile(spec, {})
+
+
+if __name__ == "__main__":
+    unittest.main()

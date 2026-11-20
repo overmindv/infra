@@ -94,7 +94,7 @@ build:
 
 # Публикация ранее собранных образов
 push:
-	@./scripts/push-images.sh
+	@PYTHON="$(PYTHON)" ./scripts/push-images.sh
 
 # Логи основных сервисов
 logs: init
@@ -109,10 +109,14 @@ kafka-check: init
 	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/kafka.sh
 
 # Быстрая проверка инфраструктурных файлов
-lint:
+lint: release-test
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
 	@sh -n scripts/*.sh tests/integration.sh
 	@sh -n tests/kafka.sh
+
+.PHONY: release-test
+release-test:
+	@$(PYTHON) -m unittest discover -s tests -p 'test_release_manifest.py'
 
 # Запуск тестов сервисов
 test: lint
