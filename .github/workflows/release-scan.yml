@@ -1,0 +1,99 @@
+name: Release scan
+
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: Contents of the published release.json (no credentials)
+        required: true
+        type: string
+      scan_ref:
+        description: Reviewed full SHA of overmindv/infra containing this workflow
+        required: true
+        type: string
+    secrets:
+      ORGANIZATION_READ_TOKEN:
+        description: Read-only token for private release source repositories
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Require private Overmindv caller
+        env:
+          PRIVATE_CALLER: ${{ github.event.repository.private }}
+          CALLER_OWNER: ${{ github.repository_owner }}
+          SCAN_REF: ${{ inputs.scan_ref }}
+        run: |
+          if [[ "$PRIVATE_CALLER" != true || "$CALLER_OWNER" != overmindv ]]; then
+            echo "::error::Release reports must be generated in a private Overmindv repository"
+            exit 2
+          fi
+          if [[ ! "$SCAN_REF" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "::error::Provide the reviewed infra commit SHA"
+            exit 2
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: overmindv/infra
+          ref: ${{ inputs.scan_ref }}
+          persist-credentials: false
+      - name: Checkout caller policy
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: release-caller
+          persist-credentials: false
+          sparse-checkout: security/release-exceptions.json
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.x'
+          cache: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Install pinned scanners
+        run: |
+          bash scripts/install-release-scan-tools.sh "$RUNNER_TEMP/release-bin"
+          printf '%s\n' "$RUNNER_TEMP/release-bin" >> "$GITHUB_PATH"
+          printf 'DOCKER_CONFIG=%s\n' "$RUNNER_TEMP/release-docker" >> "$GITHUB_ENV"
+      - name: Fetch release commits
+        env:
+          RELEASE_MANIFEST: ${{ inputs.manifest }}
+          RELEASE_SOURCE_TOKEN: ${{ secrets.ORGANIZATION_READ_TOKEN || github.token }}
+        run: |
+          printf '%s\n' "$RELEASE_MANIFEST" > "$RUNNER_TEMP/release.json"
+          python3 scripts/release_scan.py fetch-sources \
+            --manifest "$RUNNER_TEMP/release.json" --workspace "$RUNNER_TEMP/release-sources" \
+            --registry ghcr.io/overmindv
+      - name: Sign in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$DOCKER_CONFIG"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+      - name: Check exact sources and image digests
+        run: |
+          policy=security/release-exceptions.json
+          if [[ -f release-caller/$policy ]]; then policy=release-caller/$policy; fi
+          python3 scripts/release_scan.py scan --manifest "$RUNNER_TEMP/release.json" \
+            --workspace "$RUNNER_TEMP/release-sources" --output "$RUNNER_TEMP/release-security" \
+            --registry ghcr.io/overmindv --exceptions "$policy"
+      - name: Upload report and SBOMs
+        if: always() && github.event.repository.private && github.repository_owner == 'overmindv'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-security
+          path: ${{ runner.temp }}/release-security/
+          if-no-files-found: ignore
+          retention-days: 30
+      - name: Sign out of GHCR
+        if: always()
+        run: |
+          if [ -n "${DOCKER_CONFIG:-}" ]; then docker logout ghcr.io; fi
