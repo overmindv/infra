@@ -2,6 +2,8 @@
 
 Локальное окружение Overmindv запускает `users`, `entities`, `tasks`, `task-hunter`, `api-gateway`, `frontend`, Kafka и отдельный PostgreSQL для каждого сервиса-владельца данных. Исполнитель кода `sandbox` — профильный сервис: он не нужен unit/integration-тестам (programming-сабмиты проходят до статуса `queued`) и поднимается отдельно (`make up SANDBOX=1`).
 
+Для пилота с отдельным исполнителем см. [схему размещения](docs/deployment.md).
+
 ## Быстрый запуск
 
 Нужен только запущенный Docker Desktop. Из каталога `infra` выполните:
