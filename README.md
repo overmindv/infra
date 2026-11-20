@@ -84,9 +84,12 @@ Bootstrap servers:
 SANDBOX_EXECUTOR_TYPE=gojudge
 SANDBOX_FEATURE_FAKE_EXECUTOR=false
 SANDBOX_FEATURE_GOJUDGE_EXECUTOR=true
-# затем поднимите стек с профилем gojudge (требуются рантайм-образы языков из languages.yaml):
-docker compose --env-file .env -f docker-compose.yml --profile gojudge up -d --build
+# затем поднимите worker, runner и компилятор:
+docker compose --env-file .env --profile sandbox --profile gojudge up -d --build sandbox gojudge gojudge-compiler
 ```
+
+Runner и компилятор используют один образ и отдельные tmpfs. Worker обращается к ним
+во внутренней сети `sandbox-runtime`; их порты не публикуются на хосте.
 
 Используйте UUID решения как Kafka message key: так запрос и повторные события одного решения сохраняют порядок в одной partition. Рекомендуемые consumer groups: `sandbox-code-execution-v1` для запросов и `tasks-code-results-v1` для результатов. Имена topic'ов и параметры хранения задаются через `KAFKA_REQUESTS_TOPIC`, `KAFKA_RESULTS_TOPIC`, `KAFKA_RETRY_TOPIC`, `KAFKA_EVENTS_TOPIC`, `KAFKA_DEADLETTER_TOPIC`, `KAFKA_TOPIC_PARTITIONS` и `KAFKA_RETENTION_MS`.
 

@@ -109,7 +109,7 @@ kafka-check: init
 	@INFRA_ENV_FILE=$(ENV_FILE) ./tests/kafka.sh
 
 # Быстрая проверка инфраструктурных файлов
-lint: release-test
+lint: release-test sandbox-compose-test
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
 	@sh -n scripts/*.sh tests/integration.sh
 	@sh -n tests/kafka.sh
@@ -117,9 +117,12 @@ lint: release-test
 	@sh -n tests/kafka-acl-live.sh
 	@sh tests/kafka-topics-plan.sh
 
-.PHONY: release-test
+.PHONY: release-test sandbox-compose-test
 release-test:
 	@$(PYTHON) -m unittest discover -s tests -p 'test_release_manifest.py'
+
+sandbox-compose-test:
+	@$(PYTHON) -m unittest discover -s tests -p 'test_sandbox_compose.py'
 
 # Запуск тестов сервисов
 test: lint

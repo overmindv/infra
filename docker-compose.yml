@@ -356,10 +356,20 @@ services:
       SANDBOX_FEATURE_FAKE_EXECUTOR: ${SANDBOX_FEATURE_FAKE_EXECUTOR:-true}
       SANDBOX_FEATURE_GOJUDGE_EXECUTOR: ${SANDBOX_FEATURE_GOJUDGE_EXECUTOR:-false}
       SANDBOX_GOJUDGE_BASE_URL: http://gojudge:5050
+      SANDBOX_GOJUDGE_COMPILER_URL: http://gojudge-compiler:5050
       SANDBOX_STORAGE_TYPE: ${SANDBOX_STORAGE_TYPE:-memory}
+    networks:
+      - default
+      - sandbox-runtime
     depends_on:
       kafka-topics:
         condition: service_completed_successfully
+      gojudge:
+        condition: service_healthy
+        required: false
+      gojudge-compiler:
+        condition: service_healthy
+        required: false
     ports:
       - "${SANDBOX_HEALTH_PORT:-8090}:8080"
     healthcheck:
@@ -374,6 +384,7 @@ services:
   # "gojudge" и требует SANDBOX_EXECUTOR_TYPE=gojudge в .env (а также рантайм-образы языков).
   gojudge:
     profiles: ["gojudge"]
+    image: ${SANDBOX_GOJUDGE_LOCAL_IMAGE:-overmindv/infra-gojudge:local}
     build:
       context: ../sandbox
       dockerfile: deployments/docker/Dockerfile.gojudge-runtime
@@ -381,15 +392,59 @@ services:
         GOJUDGE_IMAGE: ${SANDBOX_GOJUDGE_IMAGE:-criyle/go-judge:latest}
         GO_RUNTIME_VERSION: 1.26
     privileged: true
+    read_only: true
     shm_size: 256m
-    ports:
-      - "${SANDBOX_GOJUDGE_HOST_PORT:-5050}:5050"
+    tmpfs:
+      - /tmp:size=128m
+      - /w:size=128m
+    command: ["-file-timeout", "2m", "-no-fallback"]
+    networks: [sandbox-runtime]
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5050/version >/dev/null"]
       interval: 5s
       timeout: 5s
       retries: 20
       start_period: 10s
+    restart: unless-stopped
+
+  gojudge-compiler:
+    profiles: ["gojudge"]
+    image: ${SANDBOX_GOJUDGE_LOCAL_IMAGE:-overmindv/infra-gojudge:local}
+    pull_policy: never
+    depends_on:
+      gojudge:
+        condition: service_started
+    privileged: true
+    read_only: true
+    cpus: 4
+    mem_limit: 3g
+    shm_size: 256m
+    tmpfs:
+      - /tmp:size=256m
+      - /w:size=128m
+    command:
+      - -http-addr
+      - 0.0.0.0:5050
+      - -parallelism
+      - "2"
+      - -container-cred-start
+      - "10000"
+      - -tmp-fs-param
+      - size=128m,nr_inodes=4096
+      - -output-limit
+      - "33554432"
+      - -copy-out-limit
+      - "1048576"
+      - -file-timeout
+      - 2m
+      - -no-fallback
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5050/version"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    networks: [sandbox-runtime]
     restart: unless-stopped
 
   task-hunter-postgres:
@@ -784,6 +839,10 @@ services:
       retries: 30
       start_period: 5s
     restart: unless-stopped
+
+networks:
+  sandbox-runtime:
+    internal: true
 
 volumes:
   kafka-data:
