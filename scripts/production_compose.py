@@ -396,6 +396,8 @@ def check_model(model, target, images, migration=None, runner_tls=None):
     media = services["media"]["environment"]
     if media.get("ENV") != "production" or media.get("MEDIA_ALLOW_UNSCANNED_LOCAL") != "false":
         raise ValueError("media: scan bypass is forbidden in production")
+    if media.get("MEDIA_ENABLE_UPLOAD_CLEANUP") != "false":
+        raise ValueError("media: upload cleanup requires an approved retention rollout")
     scanner = services["clamav"].get("environment", {})
     if any(scanner.get(key) != value for key, value in {
         "CLAMD_CONF_StreamMaxLength": "251M",

@@ -56,6 +56,7 @@ class ProductionComposeTest(unittest.TestCase):
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
             "MEDIA_ALLOW_UNSCANNED_LOCAL=true",
+            "MEDIA_ENABLE_UPLOAD_CLEANUP=true",
             "MINIO_ROOT_USER=fixture-root",
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
@@ -105,6 +106,12 @@ class ProductionComposeTest(unittest.TestCase):
         model = copy.deepcopy(self.model["app"])
         model["services"]["clamav"]["environment"]["CLAMD_CONF_AlertExceedsMax"] = "no"
         with self.assertRaisesRegex(ValueError, "scan limits"):
+            self.check_app(model)
+
+    def test_media_cleanup_is_disabled_until_retention_rollout(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["environment"]["MEDIA_ENABLE_UPLOAD_CLEANUP"] = "true"
+        with self.assertRaisesRegex(ValueError, "approved retention"):
             self.check_app(model)
 
     def test_media_anonymous_policy_cannot_cover_originals(self):
