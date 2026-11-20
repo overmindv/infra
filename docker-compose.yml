@@ -690,6 +690,7 @@ services:
       LOG_LEVEL: info
       DATABASE_URL: "postgres://content:${CONTENT_POSTGRES_PASSWORD}@content-postgres:5432/content?sslmode=disable"
       GRPC_ADDR: ":9090"
+      CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:-}
       KAFKA_ENABLED: ${CONTENT_KAFKA_ENABLED:-true}
       KAFKA_TOPIC: ${KAFKA_CONTENT_TOPIC:-content.content-item-events}
       KAFKA_CONTENT_MATERIAL_TOPIC: ${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
@@ -702,7 +703,7 @@ services:
       kafka-topics:
         condition: service_completed_successfully
     ports:
-      - "${CONTENT_GRPC_PORT:-9090}:9090"
+      - "127.0.0.1:${CONTENT_GRPC_PORT:-9090}:9090"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null"]
       interval: 5s
