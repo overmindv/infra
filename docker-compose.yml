@@ -388,9 +388,6 @@ services:
     build:
       context: ../sandbox
       dockerfile: deployments/docker/Dockerfile.gojudge-runtime
-      args:
-        GOJUDGE_IMAGE: ${SANDBOX_GOJUDGE_IMAGE:-criyle/go-judge:latest}
-        GO_RUNTIME_VERSION: 1.26
     privileged: true
     read_only: true
     shm_size: 256m

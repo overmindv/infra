@@ -50,6 +50,7 @@ class SandboxComposeTests(unittest.TestCase):
         worker = services["sandbox"]
         self.assertEqual(compiler["image"], runner["image"])
         self.assertIn("build", runner)
+        self.assertFalse(runner["build"].get("args"))
         self.assertNotIn("build", compiler)
         self.assertEqual(compiler["pull_policy"], "never")
         self.assertTrue(config["networks"]["sandbox-runtime"]["internal"])
