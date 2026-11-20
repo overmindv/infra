@@ -453,14 +453,25 @@ services:
     <<: *job
     platform: linux/amd64
     image: ${RELEASE_MINIO_IMAGE:?release manifest required}
-    command: !override
-      - |
-        set -eu
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}" >/dev/null
-        for bucket in media-quarantine media sandbox-tests sandbox-artifacts; do
-          mc mb --ignore-existing "local/$$bucket"
-          mc anonymous set none "local/$$bucket"
-        done
+    entrypoint: ["/bin/sh", "/app/minio/init.sh"]
+    command: !reset null
+    read_only: true
+    tmpfs:
+      - /tmp:rw,mode=1777,size=16m
+    volumes:
+      - type: bind
+        source: ./deploy/minio
+        target: /app/minio
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?limited S3 access key required}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:?limited S3 secret key required}
+      SANDBOX_TESTS_ACCESS_KEY_ID: ${SANDBOX_TESTS_ACCESS_KEY_ID:?limited tests access key required}
+      SANDBOX_TESTS_SECRET_ACCESS_KEY: ${SANDBOX_TESTS_SECRET_ACCESS_KEY:?limited tests secret key required}
+      SANDBOX_ARTIFACTS_ACCESS_KEY_ID: ${SANDBOX_ARTIFACTS_ACCESS_KEY_ID:?limited artifacts access key required}
+      SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY: ${SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY:?limited artifacts secret key required}
 
   clamav:
     <<: *service
@@ -577,12 +588,14 @@ services:
       SANDBOX_SCHEDULER_QUEUE_MAX_DEPTH: "16"
       SANDBOX_POSTGRES_DSN: postgres://overmind_app:${SANDBOX_POSTGRES_PASSWORD:?production database password required}@sandbox-postgres:5432/sandbox?sslmode=disable
       SANDBOX_TESTS_BUCKET: sandbox-tests
+      SANDBOX_TESTS_KEY_PREFIX: sandbox-tests/prod
       SANDBOX_TESTS_ENDPOINT: http://minio:9000
       SANDBOX_TESTS_REGION: us-east-1
       SANDBOX_TESTS_FORCE_PATH_STYLE: "true"
       SANDBOX_TESTS_ACCESS_KEY_ID: ${SANDBOX_TESTS_ACCESS_KEY_ID:?limited tests access key required}
       SANDBOX_TESTS_SECRET_ACCESS_KEY: ${SANDBOX_TESTS_SECRET_ACCESS_KEY:?limited tests secret key required}
       SANDBOX_ARTIFACTS_BUCKET: sandbox-artifacts
+      SANDBOX_ARTIFACTS_KEY_PREFIX: sandbox-artifacts/prod
       SANDBOX_ARTIFACTS_ENDPOINT: http://minio:9000
       SANDBOX_ARTIFACTS_REGION: us-east-1
       SANDBOX_ARTIFACTS_FORCE_PATH_STYLE: "true"

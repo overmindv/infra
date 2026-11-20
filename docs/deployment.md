@@ -133,10 +133,9 @@ Env-файл приложения держим вне репозитория п�
 Родительские каталоги принадлежат root и не доступны другим на запись.
 Команда `up` проверяет права до чтения env. `BOOTSTRAP_SUPERUSER_EMAIL`
 и пароль задаются явно. `CORS_ORIGINS`, `MEDIA_S3_PUBLIC_ENDPOINT` и
-`MEDIA_PUBLIC_BASE_URL` указывают HTTPS-адреса веб-входа и S3. MinIO, Media, тесты и
-артефакты используют разные ключи. Для трех сервисных ключей заранее настраиваем
-права только на нужные бакеты. `SANDBOX_GOJUDGE_BASE_URL` указывает на закрытый HTTPS
-прокси runner, `SANDBOX_WORKER_ID` задает постоянное имя worker.
+`MEDIA_PUBLIC_BASE_URL` указывают HTTPS-адреса веб-входа и S3. Права сервисов
+в MinIO задает отдельное задание, см. раздел ниже. `SANDBOX_GOJUDGE_BASE_URL`
+указывает на закрытый HTTPS-прокси runner, `SANDBOX_WORKER_ID` задает постоянное имя worker.
 
 Из корня `infra` сначала проверяем конфигурацию и манифест:
 
@@ -311,3 +310,74 @@ docker exec -it --user postgres overmindv-production-users-postgres-1 psql -X -U
 ```bash
 python3 tests/postgres_roles_smoke.py
 ```
+
+## Доступ к MinIO
+
+Задание `media-buckets` создает бакеты, закрывает анонимный доступ и привязывает
+[политики](../deploy/minio/) к трем учетным записям. Оно не выдает root-ключ
+Media или Sandbox. Если существующий ID состоит в группе, имеет лишние политики
+или отключен, задание завершится ошибкой и не включит его снова.
+
+| Переменные в `app.env` | Формат ID | Права |
+| --- | --- | --- |
+| `MEDIA_S3_ACCESS_KEY`, `MEDIA_S3_SECRET_KEY` | `ovm-media-<8 hex>` | Чтение, запись и удаление в `media-quarantine/uploads/*`, `media/originals/*`, `media/variants/*` |
+| `SANDBOX_TESTS_ACCESS_KEY_ID`, `SANDBOX_TESTS_SECRET_ACCESS_KEY` | `ovm-tests-<8 hex>` | Чтение в `sandbox-tests/sandbox-tests/prod/*` |
+| `SANDBOX_ARTIFACTS_ACCESS_KEY_ID`, `SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY` | `ovm-art-<8 hex>` | Только запись в `sandbox-artifacts/sandbox-artifacts/prod/runs/*` |
+
+Для readiness Media отдельно разрешен `ListBucket` на `media`: операция
+[`HeadBucket`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html)
+проверяет это право. Оно не дает читать содержимое остальных бакетов.
+Ключ чтения тестов не публикует новые suite. Публикацию и резервные копии
+выполняем под отдельными ролями вне worker.
+
+`MINIO_ROOT_USER` задаем отдельно, без префиксов рабочих ключей. Каждое значение
+пароля MinIO генерируем независимо, 20 случайных байт в hex (40 знаков).
+Не назначаем этим ID дополнительные группы или политики вручную.
+
+### Ротация ключей MinIO
+
+1. Генерируем новый ID с тем же префиксом и новый пароль, обновляем пару в
+   защищенном `app.env`. Менять только пароль действующего ключа не нужно.
+2. Выполняем `app up`. Сначала `media-buckets` создает новый ID, затем
+   затронутый сервис запускается с ним. Проверяем запросы с новым ключом,
+   в том числе загрузку и чтение для Media. Старый ID остается активен.
+3. Для Media ждем истечения уже выданных подписанных ссылок и проверяем,
+   что нет ожидающих загрузок со старым ключом. Отключаем старого пользователя
+   через [`mc admin user disable`](https://docs.min.io/aistor/reference/cli/admin/mc-admin-user/mc-admin-user-disable/).
+   Проверяем отказ старого ключа. Бакеты и объекты не удаляем.
+
+Для отката до отключения достаточно вернуть прежнюю пару в `app.env`.
+После отключения старый ID надо явно включить перед откатом. Операции
+администратора выполняем локально на узле приложения, не открывая доступ
+к MinIO Console. Смену root-пароля делаем отдельно в окно обслуживания с
+перезапуском MinIO; рабочие ключи при этом не меняем.
+
+Локальная проверка использует временный MinIO и `curl` с SigV4:
+
+```bash
+python3 tests/minio_credentials_smoke.py --benchmark
+```
+
+## Ротация токенов сервисов
+
+Для каждого токена генерируем 32 случайных байта в hex. Токен одинаковый
+на двух концах одного вызова, но не совпадает с токенами других связей или
+паролями БД и MinIO. `app check` проверяет это без вывода значений.
+
+| Переменная | Кто использует |
+| --- | --- |
+| `JWT_SECRET` | Users и Gateway |
+| `TASK_HUNTER_INGEST_TOKEN` | Task Hunter и Tasks |
+| `TASK_HUNTER_GATEWAY_TOKEN` | Gateway и Task Hunter |
+| `FEED_GATEWAY_TOKEN` | Gateway и Feed |
+| `MEDIA_GATEWAY_TOKEN` | Gateway и Media |
+| `MEDIA_USERS_TOKEN` | Users и Media |
+| `RECOMMENDATIONS_SERVICE_TOKEN` | Gateway и Recommendations |
+
+Сервисы принимают один действующий токен на связь. На время смены приостанавливаем
+затронутый вызов, обновляем одну строку в `app.env` и пересоздаем оба контейнера
+через `app up`. Проверяем успешный вызов и отказ со старым токеном, затем
+возобновляем обработку. При ошибке возвращаем предыдущую версию секрета и
+перезапускаем оба конца. После смены `JWT_SECRET` пользователям потребуется
+войти заново. Токены не передаем в аргументах команд и не выводим конфигурацию
+через `docker compose config` на экран.

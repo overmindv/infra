@@ -42,6 +42,23 @@ PORTS = {
 MIGRATION = "migrations/001_init_runs.sql"
 POSTGRES_INIT = (ROOT / "deploy/postgres/init-roles.sql", "/docker-entrypoint-initdb.d/20-roles.sql")
 POSTGRES_GRANTS = (ROOT / "deploy/postgres/runtime-grants.sql", "/app/runtime-grants.sql")
+MINIO_POLICIES = (ROOT / "deploy/minio", "/app/minio")
+MINIO_IDENTITIES = (
+    ("media", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY", "ovm-media-"),
+    ("sandbox", "SANDBOX_TESTS_ACCESS_KEY_ID", "SANDBOX_TESTS_SECRET_ACCESS_KEY", "ovm-tests-"),
+    ("sandbox", "SANDBOX_ARTIFACTS_ACCESS_KEY_ID", "SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY", "ovm-art-"),
+)
+SERVICE_TOKENS = {
+    "JWT_SECRET": (("users", "JWT_SECRET"), ("api-gateway", "JWT_SECRET")),
+    "TASK_HUNTER_INGEST_TOKEN": (("tasks", "TASK_HUNTER_INGEST_TOKEN"), ("task-hunter", "PARSER_TASKS_TOKEN")),
+    "TASK_HUNTER_GATEWAY_TOKEN": (("task-hunter", "PARSER_SECURITY_GATEWAYTOKEN"), ("api-gateway", "TASK_HUNTER_TOKEN")),
+    "FEED_GATEWAY_TOKEN": (("feed", "FEED_GATEWAY_TOKEN"), ("api-gateway", "FEED_TOKEN")),
+    "MEDIA_GATEWAY_TOKEN": (("media", "MEDIA_GATEWAY_TOKEN"), ("api-gateway", "MEDIA_TOKEN")),
+    "MEDIA_USERS_TOKEN": (("users", "MEDIA_USERS_TOKEN"), ("media", "MEDIA_USERS_TOKEN")),
+    "RECOMMENDATIONS_SERVICE_TOKEN": (
+        ("recommendations", "RECOMMENDATIONS_SERVICE_TOKEN"), ("api-gateway", "RECOMMENDATIONS_SERVICE_TOKEN"),
+    ),
+}
 RUNNER_TLS_PATH = "/run/sandbox/gojudge-tls"
 RUNNER_TLS_FILES = {
     "SANDBOX_GOJUDGE_TLS_CA_FILE": "runner-ca.pem",
@@ -199,6 +216,60 @@ def check_database_roles(services):
         }.items()
     ):
         raise ValueError("users: the demo account check must use the runtime role after grants")
+    return used_passwords
+
+
+def check_minio_credentials(services, used_secrets):
+    root = services["minio"]["environment"]
+    job = services["media-buckets"]
+    bootstrap = job["environment"]
+    if any(
+        set(service.get("environment", {})) & {"MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD"}
+        for name, service in services.items() if name not in ("minio", "media-buckets")
+    ):
+        raise ValueError("MinIO root credentials must stay out of runtime services")
+    if (job["entrypoint"] != ["/bin/sh", "/app/minio/init.sh"] or job.get("command")
+            or not job.get("read_only") or not job.get("tmpfs")
+            or bootstrap.get("OVM_MINIO_ENDPOINT", "http://minio:9000") != "http://minio:9000"):
+        raise ValueError("expected private MinIO bootstrap with ephemeral client config")
+    root_name = root["MINIO_ROOT_USER"]
+    root_secret = root["MINIO_ROOT_PASSWORD"]
+    if (not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,19}", root_name)
+            or any(root_name.startswith(prefix) for _, _, _, prefix in MINIO_IDENTITIES)
+            or not re.fullmatch(r"[a-f0-9]{40}", root_secret)
+            or root_secret in used_secrets
+            or bootstrap["MINIO_ROOT_USER"] != root_name or bootstrap["MINIO_ROOT_PASSWORD"] != root_secret):
+        raise ValueError("MinIO needs a separate root identity and a 40-digit random hex password")
+    used_secrets.add(root_secret)
+    for service, access_var, secret_var, prefix in MINIO_IDENTITIES:
+        runtime = services[service]["environment"]
+        access, secret = runtime[access_var], runtime[secret_var]
+        if (not re.fullmatch(re.escape(prefix) + r"[0-9a-f]{8}", access)
+                or not re.fullmatch(r"[a-f0-9]{40}", secret) or secret in used_secrets
+                or bootstrap[access_var] != access or bootstrap[secret_var] != secret):
+            raise ValueError(f"{access_var}: expected a dedicated MinIO identity and unique 40-digit hex secret")
+        used_secrets.add(secret)
+        if not must_wait_for(services[service], "media-buckets"):
+            raise ValueError(f"{service}: must wait for MinIO policies")
+    sandbox = services["sandbox"]["environment"]
+    if any(sandbox.get(key) != value for key, value in {
+        "SANDBOX_TESTS_BUCKET": "sandbox-tests",
+        "SANDBOX_TESTS_KEY_PREFIX": "sandbox-tests/prod",
+        "SANDBOX_ARTIFACTS_BUCKET": "sandbox-artifacts",
+        "SANDBOX_ARTIFACTS_KEY_PREFIX": "sandbox-artifacts/prod",
+    }.items()):
+        raise ValueError("Sandbox object paths must match the MinIO policies")
+
+
+def check_service_tokens(services, used_secrets):
+    for name, peers in SERVICE_TOKENS.items():
+        values = {services[service]["environment"].get(key) for service, key in peers}
+        if len(values) != 1:
+            raise ValueError(f"{name}: both services must use the same token")
+        value, = values
+        if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value) or value in used_secrets:
+            raise ValueError(f"{name}: expected a unique 64-digit random hex token")
+        used_secrets.add(value)
 
 
 def check_model(model, target, images, migration=None, runner_tls=None):
@@ -218,6 +289,7 @@ def check_model(model, target, images, migration=None, runner_tls=None):
 
     mounts = {"sandbox-migrate": (migration, "/app/001_init_runs.sql"),
               "sandbox": (runner_tls, RUNNER_TLS_PATH),
+              "media-buckets": MINIO_POLICIES,
               **{f"{name}-postgres": POSTGRES_INIT for name in DATABASES},
               **{f"{name}-grants": POSTGRES_GRANTS for name in DATABASES}}
     for name, service in services.items():
@@ -265,7 +337,7 @@ def check_model(model, target, images, migration=None, runner_tls=None):
         return
     if not must_wait_for(services["users"], "users-no-demo"):
         raise ValueError("users: demo account check must succeed before startup")
-    check_database_roles(services)
+    used_secrets = check_database_roles(services)
     email = services["users"]["environment"]["BOOTSTRAP_SUPERUSER_EMAIL"].lower()
     if "@" not in email or email.endswith((".local", ".invalid", ".test", ".example")):
         raise ValueError("users: expected an explicit administrator email")
@@ -282,14 +354,8 @@ def check_model(model, target, images, migration=None, runner_tls=None):
     if urlsplit(sandbox["SANDBOX_GOJUDGE_BASE_URL"]).port != 8443:
         raise ValueError("runner: expected the private TLS proxy on port 8443")
     check_public_edge(network, services["api-gateway"]["environment"], media["MEDIA_S3_PUBLIC_ENDPOINT"])
-    keys = {
-        services["minio"]["environment"]["MINIO_ROOT_USER"],
-        media["MEDIA_S3_ACCESS_KEY"],
-        sandbox["SANDBOX_TESTS_ACCESS_KEY_ID"],
-        sandbox["SANDBOX_ARTIFACTS_ACCESS_KEY_ID"],
-    }
-    if len(keys) != 4:
-        raise ValueError("MinIO, media, tests and artifacts must use separate access keys")
+    check_minio_credentials(services, used_secrets)
+    check_service_tokens(services, used_secrets)
 
 
 def compose_args(target, env_file):

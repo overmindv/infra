@@ -50,29 +50,23 @@ class ProductionComposeTest(unittest.TestCase):
         ]
         fixture.write_text("\n".join([
             *passwords,
+            *(f"{name}={index + 100:064x}" for index, name in enumerate(deploy.SERVICE_TOKENS)),
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
-            "JWT_SECRET=unused-fixture",
-            "FEED_GATEWAY_TOKEN=unused-fixture",
-            "TASK_HUNTER_INGEST_TOKEN=unused-fixture",
-            "TASK_HUNTER_GATEWAY_TOKEN=unused-fixture",
-            "RECOMMENDATIONS_SERVICE_TOKEN=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
-            "MEDIA_GATEWAY_TOKEN=unused-fixture",
-            "MEDIA_USERS_TOKEN=unused-fixture",
             "MINIO_ROOT_USER=fixture-root",
-            "MINIO_ROOT_PASSWORD=unused-fixture",
-            "MEDIA_S3_ACCESS_KEY=fixture-media",
-            "MEDIA_S3_SECRET_KEY=unused-fixture",
+            f"MINIO_ROOT_PASSWORD={101:040x}",
+            "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
+            f"MEDIA_S3_SECRET_KEY={102:040x}",
             "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.example.org",
             "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.example.org/media",
             "CORS_ORIGINS=https://app.fixture.example.org",
             "SANDBOX_WORKER_ID=fixture-worker",
             "SANDBOX_GOJUDGE_BASE_URL=https://runner.fixture.invalid:8443",
-            "SANDBOX_TESTS_ACCESS_KEY_ID=fixture-tests",
-            "SANDBOX_TESTS_SECRET_ACCESS_KEY=unused-fixture",
-            "SANDBOX_ARTIFACTS_ACCESS_KEY_ID=fixture-artifacts",
-            "SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY=unused-fixture",
+            "SANDBOX_TESTS_ACCESS_KEY_ID=ovm-tests-00000001",
+            f"SANDBOX_TESTS_SECRET_ACCESS_KEY={103:040x}",
+            "SANDBOX_ARTIFACTS_ACCESS_KEY_ID=ovm-art-00000001",
+            f"SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY={104:040x}",
         ]) + "\n", encoding="utf-8")
         cls.images = {}
         cls.model = {}
@@ -197,6 +191,32 @@ class ProductionComposeTest(unittest.TestCase):
         data = next(volume for volume in model["services"]["media-postgres"]["volumes"] if volume["type"] == "volume")
         data["source"] = "users-postgres"
         with self.assertRaisesRegex(ValueError, "unexpected database data volume"):
+            self.check_app(model)
+
+    def test_minio_root_secret_cannot_reach_media(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["environment"]["MINIO_ROOT_PASSWORD"] = "unexpected"
+        with self.assertRaisesRegex(ValueError, "root credentials must stay out"):
+            self.check_app(model)
+
+    def test_minio_bootstrap_and_runtime_must_agree(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media-buckets"]["environment"]["MEDIA_S3_ACCESS_KEY"] = "ovm-media-00000002"
+        with self.assertRaisesRegex(ValueError, "dedicated MinIO identity"):
+            self.check_app(model)
+
+    def test_service_secrets_must_be_distinct(self):
+        model = copy.deepcopy(self.model["app"])
+        gateway = model["services"]["api-gateway"]["environment"]
+        model["services"]["media"]["environment"]["MEDIA_GATEWAY_TOKEN"] = gateway["FEED_TOKEN"]
+        gateway["MEDIA_TOKEN"] = gateway["FEED_TOKEN"]
+        with self.assertRaisesRegex(ValueError, "unique 64-digit"):
+            self.check_app(model)
+
+    def test_service_token_must_match_both_ends(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["feed"]["environment"]["FEED_GATEWAY_TOKEN"] = f"{1000:064x}"
+        with self.assertRaisesRegex(ValueError, "both services must use the same token"):
             self.check_app(model)
 
 
