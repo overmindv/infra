@@ -122,6 +122,16 @@
 		path /media/originals/* /media/variants/*
 		method GET HEAD
 	}
+	@original_download {
+		path /media/originals/*
+		method GET HEAD
+	}
+	header @original_download {
+		Content-Type application/octet-stream
+		Content-Disposition attachment
+		Cache-Control "private, no-store"
+		defer
+	}
 
 	route {
 		respond @foreign_origin 403

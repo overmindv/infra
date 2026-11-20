@@ -41,6 +41,7 @@ for bucket in media-quarantine media sandbox-tests sandbox-artifacts; do
     run "create $bucket" mc mb --ignore-existing "local/$bucket"
     run "privatize $bucket" mc anonymous set none "local/$bucket"
 done
+run "public WebP variants policy" mc anonymous set-json /app/minio/public-media.json local/media
 run "media policy" mc admin policy create local ovm-media /app/minio/media.json
 run "test reader policy" mc admin policy create local ovm-tests-reader /app/minio/tests-reader.json
 run "artifact writer policy" mc admin policy create local ovm-artifacts-writer /app/minio/artifacts-writer.json

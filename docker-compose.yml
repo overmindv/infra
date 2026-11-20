@@ -694,7 +694,15 @@ services:
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc mb --ignore-existing local/media-quarantine
         mc mb --ignore-existing local/media
-        mc anonymous set download local/media
+        mc anonymous set none local/media-quarantine
+        mc anonymous set-json /app/minio/public-media.json local/media
+    volumes:
+      - type: bind
+        source: ./deploy/minio
+        target: /app/minio
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}

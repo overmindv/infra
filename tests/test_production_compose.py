@@ -1,5 +1,6 @@
 import copy
 import hashlib
+import json
 import sys
 import tempfile
 import unittest
@@ -105,6 +106,13 @@ class ProductionComposeTest(unittest.TestCase):
         model["services"]["clamav"]["environment"]["CLAMD_CONF_AlertExceedsMax"] = "no"
         with self.assertRaisesRegex(ValueError, "scan limits"):
             self.check_app(model)
+
+    def test_media_anonymous_policy_cannot_cover_originals(self):
+        data = json.loads(deploy.PUBLIC_MEDIA_POLICY.read_text(encoding="utf-8"))
+        data["Statement"][0]["Resource"] = ["arn:aws:s3:::media/*"]
+        with patch.object(Path, "read_text", return_value=json.dumps(data)):
+            with self.assertRaisesRegex(ValueError, "anonymous policy"):
+                self.check_app(self.model["app"])
 
     def test_wrong_migration_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "release checksum"):

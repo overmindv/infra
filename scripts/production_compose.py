@@ -43,6 +43,7 @@ MIGRATION = "migrations/001_init_runs.sql"
 POSTGRES_INIT = (ROOT / "deploy/postgres/init-roles.sql", "/docker-entrypoint-initdb.d/20-roles.sql")
 POSTGRES_GRANTS = (ROOT / "deploy/postgres/runtime-grants.sql", "/app/runtime-grants.sql")
 MINIO_POLICIES = (ROOT / "deploy/minio", "/app/minio")
+PUBLIC_MEDIA_POLICY = MINIO_POLICIES[0] / "public-media.json"
 MINIO_IDENTITIES = (
     ("media", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY", "ovm-media-"),
     ("sandbox", "SANDBOX_TESTS_ACCESS_KEY_ID", "SANDBOX_TESTS_SECRET_ACCESS_KEY", "ovm-tests-"),
@@ -220,6 +221,14 @@ def check_database_roles(services):
 
 
 def check_minio_credentials(services, used_secrets):
+    policy = json.loads(PUBLIC_MEDIA_POLICY.read_text(encoding="utf-8"))
+    if policy != {"Version": "2012-10-17", "Statement": [{
+        "Effect": "Allow",
+        "Principal": {"AWS": ["*"]},
+        "Action": ["s3:GetObject"],
+        "Resource": ["arn:aws:s3:::media/variants/public/*"],
+    }]}:
+        raise ValueError("MinIO anonymous policy must only allow GET of public variants")
     root = services["minio"]["environment"]
     job = services["media-buckets"]
     bootstrap = job["environment"]
