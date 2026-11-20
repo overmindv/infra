@@ -8,6 +8,23 @@
   "excluded": [
     "sandbox"
   ],
+  "canonical_files": [
+    {
+      "source": "docs/harness/golangci/.golangci.yml",
+      "targets": {
+        "api-gateway": ".golangci.yml",
+        "content": ".golangci.yml",
+        "entities": ".golangci.yml",
+        "feed": ".golangci.yml",
+        "media": ".golangci.yml",
+        "parker": ".golangci.yml",
+        "recommendations": ".golangci.yml",
+        "task-hunter": ".golangci.yml",
+        "tasks": ".golangci.yml",
+        "users": ".golangci.yml"
+      }
+    }
+  ],
   "services": {
     "docs": {
       "instructions": [

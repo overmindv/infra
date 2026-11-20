@@ -203,6 +203,33 @@ class HarnessTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("make test", result.stdout)
 
+    def test_canonical_file_match_passes_and_drift_fails_without_contents(self):
+        users = self.add_users()
+        docs = self.root / "docs/harness/golangci"
+        docs.mkdir(parents=True)
+        (self.root / "docs/harness/README.md").write_text("# Harness\n")
+        source = docs / ".golangci.yml"
+        source.write_text("canonical-secret-marker\n")
+        target = users / ".golangci.yml"
+        target.write_text("canonical-secret-marker\n")
+        self.manifest["canonical_files"] = [{
+            "source": "docs/harness/golangci/.golangci.yml",
+            "targets": {"users": ".golangci.yml"},
+        }]
+        self.write_manifest()
+
+        matching = self.run_cli("check")
+
+        self.assertEqual(matching.returncode, 0, matching.stdout + matching.stderr)
+        target.write_text("drift-secret-marker\n")
+
+        drifted = self.run_cli("check")
+
+        self.assertNotEqual(drifted.returncode, 0)
+        self.assertIn("canonical file drift", drifted.stdout)
+        self.assertNotIn("canonical-secret-marker", drifted.stdout)
+        self.assertNotIn("drift-secret-marker", drifted.stdout)
+
     def test_timeout_returns_124(self):
         self.add_users()
         env = self.fake_make("sleep 20\n")

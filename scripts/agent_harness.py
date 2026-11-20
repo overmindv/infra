@@ -46,6 +46,9 @@ def load_manifest(infra):
         raise ValueError("shared_references must be a list")
     for reference in references:
         relative_path(reference)
+    canonical_files = data.get("canonical_files", [])
+    if not isinstance(canonical_files, list):
+        raise ValueError("canonical_files must be a list")
     for name, service in services.items():
         if not re.fullmatch(r"[a-z][a-z0-9-]*", name) or not isinstance(service, dict):
             raise ValueError("invalid service entry")
@@ -68,6 +71,17 @@ def load_manifest(infra):
                 raise ValueError("requires must be a list")
             for path in requires:
                 relative_path(path)
+    for canonical in canonical_files:
+        if not isinstance(canonical, dict):
+            raise ValueError("invalid canonical file entry")
+        relative_path(canonical.get("source"))
+        targets = canonical.get("targets")
+        if not isinstance(targets, dict) or not targets:
+            raise ValueError("canonical file targets must be a non-empty object")
+        for name, path in targets.items():
+            if name not in services:
+                raise ValueError("canonical file target has unknown service")
+            relative_path(path)
     return data
 
 
@@ -165,6 +179,34 @@ def check_workspace(infra, data, names, strict=False, selected=False):
         elif not (infra.parent / reference).is_file():
             print("ERROR missing shared reference: {}".format(reference))
             errors += 1
+    for canonical in data.get("canonical_files", []):
+        source = infra.parent / canonical["source"]
+        if not source.is_file():
+            owner = Path(canonical["source"]).parts[0]
+            if owner not in missing:
+                print("ERROR missing canonical file: {}".format(source))
+                errors += 1
+            continue
+        try:
+            expected = source.read_bytes()
+        except OSError:
+            print("ERROR unreadable canonical file: {}".format(source))
+            errors += 1
+            continue
+        for name, relative in canonical["targets"].items():
+            if name not in names:
+                continue
+            repo = repo_path(infra, name)
+            if not repo.is_dir():
+                continue
+            target = repo / relative
+            try:
+                if target.is_symlink() or not target.is_file() or target.read_bytes() != expected:
+                    print("ERROR canonical file drift: {}".format(target))
+                    errors += 1
+            except OSError:
+                print("ERROR canonical file drift: {}".format(target))
+                errors += 1
     if strict:
         errors += len(missing)
     print("{}: {} error(s), {} missing repository/repositories".format(
