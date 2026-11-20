@@ -1,0 +1,43 @@
+services:
+  prometheus:
+    volumes:
+      - type: tmpfs
+        target: /prometheus
+        tmpfs:
+          size: 67108864
+          mode: 01777
+
+  alertmanager:
+    volumes:
+      - type: tmpfs
+        target: /alertmanager
+        tmpfs:
+          size: 16777216
+          mode: 01777
+
+  monitor-test-sink:
+    image: &fixture python:3-alpine@sha256:26730869004e2b9c4b9ad09cab8625e81d256d1ce97e72df5520e806b1709f92
+    command: [python, /fixture.py]
+    environment:
+      FIXTURE_WEBHOOK_TOKEN: ${COMPOSE_PROJECT_NAME:?set an isolated project name}
+    networks: [monitoring-egress]
+    volumes:
+      - ./tests/monitoring-fixture.py:/fixture.py:ro
+
+  monitor-test-tasks:
+    image: *fixture
+    command: [python, /fixture.py]
+    networks:
+      default:
+        aliases: [tasks]
+    volumes:
+      - ./tests/monitoring-fixture.py:/fixture.py:ro
+
+  monitor-test-worker:
+    image: *fixture
+    command: [python, /fixture.py, "9090"]
+    networks:
+      default:
+        aliases: [sandbox]
+    volumes:
+      - ./tests/monitoring-fixture.py:/fixture.py:ro

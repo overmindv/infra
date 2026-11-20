@@ -1,0 +1,98 @@
+x-monitoring: &monitoring
+  restart: unless-stopped
+  read_only: true
+  user: "65534:65534"
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
+services:
+  prometheus:
+    <<: *monitoring
+    image: ${MONITORING_PROMETHEUS_IMAGE:?set the approved Prometheus image digest}
+    command:
+      - --config.file=/config/prometheus.yml
+      - --web.config.file=/run/monitoring/web.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=512MB
+      - --query.max-concurrency=2
+      - --query.max-samples=1000000
+      - --query.timeout=15s
+    mem_limit: 192m
+    cpus: 0.5
+    ports:
+      - "127.0.0.1:${MONITORING_UI_PORT:-9097}:9090"
+    networks: [default, monitoring]
+    volumes:
+      - monitoring-prometheus:/prometheus
+      - ./observability/prometheus:/config:ro
+      - type: bind
+        source: ${MONITORING_STATE_DIR:-./.local/monitoring}/prometheus
+        target: /run/monitoring
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MONITORING_STATE_DIR:-./.local/monitoring}/targets
+        target: /run/targets
+        read_only: true
+        bind:
+          create_host_path: false
+
+  alertmanager:
+    <<: *monitoring
+    image: ${MONITORING_ALERTMANAGER_IMAGE:?set the approved Alertmanager image digest}
+    command:
+      - --config.file=/config/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --cluster.listen-address=
+      - --data.retention=120h
+    mem_limit: 64m
+    cpus: 0.25
+    networks: [monitoring, monitoring-egress]
+    volumes:
+      - monitoring-alertmanager:/alertmanager
+      - ./observability/alertmanager.yml:/config/alertmanager.yml:ro
+      - type: bind
+        source: ${MONITORING_STATE_DIR:-./.local/monitoring}/alertmanager
+        target: /run/alertmanager
+        read_only: true
+        bind:
+          create_host_path: false
+
+  monitoring-signals:
+    <<: *monitoring
+    image: ${MONITORING_SIGNALS_IMAGE:-ghcr.io/prometheus/node-exporter-linux-amd64:v1.13.0-distroless@sha256:ae43f04c297830dced129859e1cba9a80179266a5a328858c5dc4f18b430d85b}
+    command:
+      - --collector.disable-defaults
+      - --collector.textfile
+      - --collector.textfile.directory=/signals
+      - --web.disable-exporter-metrics
+      - --web.max-requests=2
+    mem_limit: 48m
+    cpus: 0.1
+    networks: [monitoring]
+    volumes:
+      - type: bind
+        source: ${MONITORING_STATE_DIR:-./.local/monitoring}/signals
+        target: /signals
+        read_only: true
+        bind:
+          create_host_path: false
+
+  tasks:
+    environment:
+      TASKS_EXECUTION_METRICS_TOKEN: ${TASKS_EXECUTION_METRICS_TOKEN:-}
+
+  recommendations:
+    environment:
+      RECOMMENDATIONS_STUDY_METRICS_TOKEN: ${RECOMMENDATIONS_STUDY_METRICS_TOKEN:-}
+
+networks:
+  monitoring:
+    internal: true
+  monitoring-egress:
+
+volumes:
+  monitoring-alertmanager:
+  monitoring-prometheus:
