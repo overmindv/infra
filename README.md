@@ -131,6 +131,10 @@ Session хранится в `infra/.local/task-hunter/telegram.session`, име�
 
 Для website-сбора внешние ключи не требуются. LeetCode и CodeRun читаются напрямую, а публичный Reader fallback Codeforces уже задан в `TASK_HUNTER_CODEFORCES_READER_URL`; при необходимости его можно заменить self-hosted совместимым endpoint.
 
+## Релизы
+
+Локальный `make build` не готовит релиз. Порядок сборки из Git-коммитов и публикации по digest описан в [инструкции по релизам](docs/releases.md).
+
 ## Миграции и данные
 
 Каждый сервис использует собственную PostgreSQL. Перед запуском приложения отдельный одноразовый контейнер выполняет `goose up`; вручную накатывать миграции не требуется.

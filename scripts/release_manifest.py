@@ -1,0 +1,221 @@
+#!/usr/bin/env python3
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import uuid
+from pathlib import Path
+
+from release_sources import (
+    DIGEST, DOCKERFILES, IMAGE, REPOS, SHA, UPSTREAM,
+    archive, git, image_name, metadata, pin_dockerfile, pinned_image,
+    remote_source, verify_ref,
+)
+
+
+PLATFORM = "linux/amd64"
+RELEASE_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,47}")
+
+
+def unique_keys(pairs):
+    data = {}
+    for key, value in pairs:
+        if key in data:
+            raise ValueError(f"duplicate JSON key: {key}")
+        data[key] = value
+    return data
+
+
+def read_json(path):
+    with path.open(encoding="utf-8") as file:
+        return json.load(file, object_pairs_hook=unique_keys)
+
+
+def write_json(path, data):
+    with path.open("x", encoding="utf-8", newline="\n") as file:
+        file.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def fingerprint(plan):
+    return hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
+
+
+def plan_inputs(sources, pins, registry, release):
+    if not isinstance(sources, dict) or sources.keys() != REPOS:
+        raise ValueError(f"sources must contain exactly: {', '.join(sorted(REPOS))}")
+    for name, sha in sources.items():
+        if not isinstance(sha, str) or not SHA.fullmatch(sha):
+            raise ValueError(f"{name}: expected a full lowercase commit SHA")
+    if not isinstance(pins, dict):
+        raise ValueError("pins must be an object mapping image refs to digests")
+    for ref, digest in pins.items():
+        image_name(ref)
+        if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+            raise ValueError(f"{ref}: expected sha256 digest")
+    if not isinstance(registry, str) or not IMAGE.fullmatch(registry):
+        raise ValueError("expected a registry namespace without a tag or scheme")
+    if not isinstance(release, str) or not RELEASE_ID.fullmatch(release):
+        raise ValueError("expected a lowercase release name (1-48 characters)")
+
+
+def make_plan(workspace, sources, pins, registry, release):
+    plan_inputs(sources, pins, registry, release)
+    upstream = {service: pinned_image(ref, pins) for service, ref in UPSTREAM.items()}
+    repositories = {name: (workspace / name).resolve() for name in sources}
+    records = {}
+    for name, repo in sorted(repositories.items()):
+        verify_ref(name, repo, sources[name])
+        records[name] = metadata(repo, sources[name])
+
+    images = {}
+    for service, (name, path) in sorted(DOCKERFILES.items()):
+        spec = git(repositories[name], "show", f"{sources[name]}:{path}").decode()
+        _, bases = pin_dockerfile(spec, pins)
+        images[service] = {"source": name, "dockerfile": path, "bases": bases}
+    return {
+        "version": 1, "release": release, "registry": registry, "platform": PLATFORM,
+        "sources": sources, "pins": pins, "metadata": records,
+        "upstream": upstream, "images": images,
+    }
+
+
+def validate_plan(plan):
+    if not isinstance(plan, dict) or plan.get("version") != 1:
+        raise ValueError("unsupported release plan")
+    plan_inputs(plan["sources"], plan["pins"], plan["registry"], plan["release"])
+    if plan["platform"] != PLATFORM or plan["images"].keys() != DOCKERFILES.keys():
+        raise ValueError("unexpected platform or image set in release plan")
+    for service, (name, path) in DOCKERFILES.items():
+        image = plan["images"][service]
+        if image["source"] != name or image["dockerfile"] != path:
+            raise ValueError(f"{service}: unexpected image source")
+    if plan["upstream"] != {
+        name: pinned_image(ref, plan["pins"]) for name, ref in UPSTREAM.items()
+    }:
+        raise ValueError("upstream images do not match the pins")
+
+
+def labels_for(plan, service, plan_id):
+    name = DOCKERFILES[service][0]
+    return {
+        "org.opencontainers.image.source": remote_source(name),
+        "org.opencontainers.image.revision": plan["sources"][name],
+        "io.overmindv.release.plan": plan_id,
+        "io.overmindv.release.service": service,
+    }
+
+
+def inspect(image, labels):
+    result = subprocess.check_output(["docker", "image", "inspect", image])
+    data, = json.loads(result)
+    actual = data["Config"].get("Labels") or {}
+    if any(actual.get(key) != value for key, value in labels.items()):
+        raise ValueError(f"{image}: local image does not match the release plan")
+    if f'{data["Os"]}/{data["Architecture"]}' != PLATFORM:
+        raise ValueError(f"{image}: unexpected image platform")
+    image_id = data["Id"]
+    if not DIGEST.fullmatch(image_id):
+        raise ValueError(f"{image}: invalid local image ID")
+    return image_id
+
+
+def build(workspace, plan):
+    validate_plan(plan)
+    if plan != make_plan(workspace, plan["sources"], plan["pins"],
+                         plan["registry"], plan["release"]):
+        raise ValueError("plan does not match the pinned source trees")
+    plan_id = fingerprint(plan)
+    built = {}
+    for name in sorted(REPOS - {"infra"}):
+        with tempfile.TemporaryDirectory(prefix="overmindv-release-") as payload:
+            context = Path(payload)
+            archive(workspace / name, plan["sources"][name], context)
+            for service, (repo, path) in DOCKERFILES.items():
+                if name != repo:
+                    continue
+                dockerfile = context / path
+                spec = git(workspace / name, "show", f'{plan["sources"][name]}:{path}')
+                if dockerfile.read_bytes() != spec:
+                    raise ValueError(f"{service}: archive changed the Dockerfile")
+                pinned, _ = pin_dockerfile(spec.decode(), plan["pins"])
+                dockerfile.write_bytes(pinned.encode())
+                labels = labels_for(plan, service, plan_id)
+                local = f"overmindv-release/{service}:{uuid.uuid4().hex}"
+                command = [
+                    "docker", "buildx", "build", "--load", "--platform", PLATFORM,
+                    "--tag", local, "--file", str(dockerfile),
+                ]
+                for key, value in labels.items():
+                    command.extend(("--label", f"{key}={value}"))
+                subprocess.run([*command, str(context)], check=True)
+                built[service] = inspect(local, labels)
+    return {"plan": plan, "local_images": built}
+
+
+def publish(receipt):
+    plan, images = receipt["plan"], receipt["local_images"]
+    validate_plan(plan)
+    if images.keys() != DOCKERFILES.keys():
+        raise ValueError("build receipt must contain every release image")
+    plan_id = fingerprint(plan)
+    for service, image_id in images.items():
+        if not isinstance(image_id, str) or not DIGEST.fullmatch(image_id):
+            raise ValueError(f"{service}: invalid local image ID")
+        if inspect(image_id, labels_for(plan, service, plan_id)) != image_id:
+            raise ValueError(f"{service}: local image does not match build receipt")
+
+    published = {}
+    for service, image_id in sorted(images.items()):
+        repository = f'{plan["registry"]}/{service}'
+        tag = f'rel-{plan["release"]}-{image_id.removeprefix("sha256:")}'
+        ref = f"{repository}:{tag}"
+        subprocess.run(["docker", "image", "tag", image_id, ref], check=True)
+        output = subprocess.check_output(["docker", "image", "push", ref], text=True)
+        match = re.search(rf"^{re.escape(tag)}: digest: (sha256:[a-f0-9]{{64}}) size: \d+$",
+                          output, re.M)
+        if not match:
+            raise ValueError(f"{service}: registry manifest digest not found in push output")
+        published[service] = f"{repository}@{match[1]}"
+        print(f"{service}: {published[service]}", flush=True)
+    return {"plan": plan, "images": published}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Build and publish an immutable release")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("plan", "build", "publish"):
+        command = commands.add_parser(name)
+        command.add_argument("--output", type=Path, required=True)
+        if name != "publish":
+            command.add_argument("--workspace", type=Path, required=True)
+        if name == "plan":
+            command.add_argument("--sources", type=Path, required=True)
+            command.add_argument("--pins", type=Path, required=True)
+            command.add_argument("--registry", required=True)
+            command.add_argument("--release", required=True)
+        elif name == "build":
+            command.add_argument("--plan", type=Path, required=True)
+        else:
+            command.add_argument("--build", type=Path, required=True)
+    args = parser.parse_args()
+    try:
+        if args.output.exists() or not args.output.parent.is_dir():
+            raise ValueError("output must be a new file in an existing directory")
+        if args.command == "plan":
+            result = make_plan(args.workspace.resolve(), read_json(args.sources),
+                               read_json(args.pins), args.registry, args.release)
+        elif args.command == "build":
+            result = build(args.workspace.resolve(), read_json(args.plan))
+        else:
+            result = publish(read_json(args.build))
+        write_json(args.output, result)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError,
+            subprocess.CalledProcessError) as error:
+        parser.exit(2, f"release: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
