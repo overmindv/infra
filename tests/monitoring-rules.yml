@@ -1,0 +1,94 @@
+rule_files:
+  - ../observability/prometheus/alerts.yml
+evaluation_interval: 30s
+
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'up{job="sandbox",instance="sandbox:9090"}'
+        values: '1 0x6'
+      - series: 'up{job="host-signals",instance="monitoring-signals:9100"}'
+        values: '1x12'
+      - series: 'overmind_backup_last_attempt_ok{job="host-signals",instance="monitoring-signals:9100"}'
+        values: '1 0x10'
+      - series: 'overmind_backup_last_success_timestamp_seconds{job="host-signals",instance="monitoring-signals:9100"}'
+        values: '-100000x12'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: MonitoringTargetDown
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: MonitoringTargetDown
+        exp_alerts:
+          - exp_labels: {job: sandbox, instance: "sandbox:9090", severity: critical}
+            exp_annotations: {summary: "sandbox: нет ответа от sandbox:9090"}
+      - eval_time: 1m
+        alertname: BackupFailed
+        exp_alerts:
+          - exp_labels: {job: host-signals, instance: "monitoring-signals:9100", severity: critical}
+            exp_annotations: {summary: "Последний бэкап не прошел проверку"}
+      - eval_time: 6m
+        alertname: BackupStale
+        exp_alerts:
+          - exp_labels: {job: host-signals, instance: "monitoring-signals:9100", severity: critical}
+            exp_annotations: {summary: "Нет подтвержденного бэкапа за последние 26 часов"}
+
+  - interval: 30s
+    input_series:
+      - series: 'up{job="tasks-execution",instance="tasks:8080"}'
+        values: '1x18'
+      - series: 'tasks_execution_queue_sample_ok{job="tasks-execution",instance="tasks:8080"}'
+        values: '1x6 0x8'
+      - series: 'tasks_execution_queue_oldest_seconds{job="tasks-execution",instance="tasks:8080",queue="outbox"}'
+        values: '90x18'
+      - series: 'tasks_execution_queue_oldest_seconds{job="tasks-execution",instance="tasks:8080",queue="result"}'
+        values: '90x18'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ExecutionQueueOldest
+        exp_alerts:
+          - exp_labels: {job: tasks-execution, instance: "tasks:8080", queue: outbox, severity: warning}
+            exp_annotations: {summary: "Очередь Tasks (outbox) не разгружается"}
+      - eval_time: 6m
+        alertname: ExecutionQueueOldest
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: ExecutionQueueSamplerDown
+        exp_alerts:
+          - exp_labels: {job: tasks-execution, instance: "tasks:8080", severity: warning}
+            exp_annotations: {summary: "Tasks не может прочитать возраст очередей"}
+
+  - interval: 30s
+    input_series:
+      - series: 'overmind_disk_available_ratio{job="host-signals",instance="monitoring-signals:9100"}'
+        values: '0.10x22'
+      - series: 'parker_http_requests_total{job="core",instance="tasks:8080",status="503"}'
+        values: '0+5x22'
+      - series: 'parker_http_requests_total{job="core",instance="tasks:8080",status="200"}'
+        values: '0+30x22'
+      - series: 'parker_http_requests_total{job="core",instance="content:8080",status="503"}'
+        values: '0+1x22'
+      - series: 'parker_http_request_duration_seconds_bucket{job="core",instance="tasks:8080",le="1"}'
+        values: '0+10x22'
+      - series: 'parker_http_request_duration_seconds_bucket{job="core",instance="tasks:8080",le="2.5"}'
+        values: '0+20x22'
+      - series: 'parker_http_request_duration_seconds_bucket{job="core",instance="tasks:8080",le="+Inf"}'
+        values: '0+20x22'
+      - series: 'parker_http_request_duration_seconds_count{job="core",instance="tasks:8080"}'
+        values: '0+20x22'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CoreHTTPErrorRate
+        exp_alerts:
+          - exp_labels: {instance: "tasks:8080", severity: warning}
+            exp_annotations: {summary: "tasks:8080: больше 5% ответов HTTP 5xx"}
+      - eval_time: 10m
+        alertname: CoreHTTPLatency
+        exp_alerts:
+          - exp_labels: {instance: "tasks:8080", severity: warning}
+            exp_annotations: {summary: "tasks:8080: p95 HTTP выше 1 секунды"}
+      - eval_time: 10m
+        alertname: HostDiskLow
+        exp_alerts:
+          - exp_labels: {job: host-signals, instance: "monitoring-signals:9100", severity: warning}
+            exp_annotations: {summary: "На диске данных осталось меньше 15%"}

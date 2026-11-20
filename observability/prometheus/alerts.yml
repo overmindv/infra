@@ -1,0 +1,123 @@
+groups:
+  - name: availability
+    rules:
+      - alert: MonitoringTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }}: нет ответа от {{ $labels.instance }}"
+
+      - alert: CoreServiceNotReady
+        expr: parker_ready{job="core"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance }} не готов принимать запросы"
+
+      - alert: AlertDeliveryFailed
+        expr: sum(increase(alertmanager_notifications_failed_total{job="alertmanager"}[10m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Alertmanager не доставил оповещение"
+
+  - name: applications
+    rules:
+      - alert: CoreHTTPErrorRate
+        expr: |
+          sum by (instance) (rate(parker_http_requests_total{job="core",status=~"5.."}[5m]))
+          / sum by (instance) (rate(parker_http_requests_total{job="core"}[5m])) > 0.05
+          and sum by (instance) (increase(parker_http_requests_total{job="core"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: больше 5% ответов HTTP 5xx"
+
+      - alert: CoreHTTPLatency
+        expr: |
+          histogram_quantile(0.95, sum by (instance, le) (rate(parker_http_request_duration_seconds_bucket{job="core"}[5m]))) > 1
+          and sum by (instance) (increase(parker_http_request_duration_seconds_count{job="core"}[5m])) >= 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance }}: p95 HTTP выше 1 секунды"
+
+      - alert: ExecutionQueueSamplerDown
+        expr: up{job="tasks-execution"} == 1 unless on(job, instance) tasks_execution_queue_sample_ok{job="tasks-execution"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tasks не может прочитать возраст очередей"
+
+      - alert: ExecutionQueueOldest
+        expr: |
+          (tasks_execution_queue_oldest_seconds{job="tasks-execution",queue="outbox"} > 60
+          or tasks_execution_queue_oldest_seconds{job="tasks-execution",queue="result"} > 240)
+          and on(job, instance) tasks_execution_queue_sample_ok{job="tasks-execution"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Очередь Tasks ({{ $labels.queue }}) не разгружается"
+
+      - alert: RecommendationCatalogStale
+        expr: recommendations_study_catalog_state{job="recommendations-study"} < 2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Каталог Recommendations недоступен или устарел"
+
+      - alert: RecommendationEvidenceErrors
+        expr: sum by (instance) (increase(recommendations_learning_evidence_failures_total{job="recommendations-study"}[5m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Recommendations не успевает обработать события обучения"
+
+  - name: host
+    rules:
+      - alert: BackupFailed
+        expr: overmind_backup_last_attempt_ok{job="host-signals"} == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Последний бэкап не прошел проверку"
+
+      - alert: BackupStale
+        expr: |
+          time() - overmind_backup_last_success_timestamp_seconds{job="host-signals"} > 26 * 3600
+          or (up{job="host-signals"} == 1
+          unless on(job, instance) overmind_backup_last_success_timestamp_seconds{job="host-signals"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Нет подтвержденного бэкапа за последние 26 часов"
+
+      - alert: HostDiskLow
+        expr: overmind_disk_available_ratio{job="host-signals"} < 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "На диске данных осталось меньше 15%"
+
+      - alert: HostDiskSampleStale
+        expr: |
+          time() - overmind_disk_sample_timestamp_seconds{job="host-signals"} > 180
+          or (up{job="host-signals"} == 1
+          unless on(job, instance) overmind_disk_sample_timestamp_seconds{job="host-signals"})
+          or node_textfile_scrape_error{job="host-signals"} == 1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сигналы диска или бэкапа не обновляются"
