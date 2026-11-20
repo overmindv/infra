@@ -52,6 +52,10 @@ make push RELEASE_BUILD=.local/build.json RELEASE_MANIFEST=.local/release.json
 `kafka-topics` использует образ Kafka, `media-buckets` использует образ MinIO.
 Сам скрипт ничего не разворачивает и не запускает миграции.
 
+Для Sandbox используйте [порядок обновления рантайма](https://github.com/overmindv/sandbox/blob/main/docs/runtime-rollout.md).
+В Kubernetes у каждого релиза своя пара runner и компилятора. Перед обновлением
+воркера сохраните файлы, которые отрисованы из `release.json`.
+
 Сохраните `release.json` вместе с артефактами поставки. Для повторной сборки можно
 использовать вложенный `plan` и чистые клоны с теми же коммитами. План фиксирует исходники
 и базовые образы, но не обещает побайтово идентичный результат, если Dockerfile обращается

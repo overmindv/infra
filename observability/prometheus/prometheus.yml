@@ -55,7 +55,7 @@ scrape_configs:
         regex: '__address__|__scheme__|__metrics_path__|__scrape_interval__|__scrape_timeout__|job'
     metric_relabel_configs:
       - source_labels: [__name__, language]
-        regex: 'sandbox_(scheduler_(queue_depth|queue_capacity|in_flight)|executor_latency_ms_(sum|count));(|python|go)'
+        regex: 'sandbox_(scheduler_(queue_depth|queue_capacity|in_flight|slots_capacity|slots_utilization_percent)|executor_latency_ms_(sum|count));(|python|go)'
         action: keep
       - action: labelkeep
         regex: '__name__|job|instance|language'
