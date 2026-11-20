@@ -487,6 +487,16 @@ services:
     environment:
       DATABASE_URL: postgres://overmind_migrator:${MEDIA_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@media-postgres:5432/media?sslmode=disable
 
+  media-renderer:
+    <<: *service
+    build: !reset null
+    image: ${RELEASE_MEDIA_IMAGE:?release manifest required}
+    cpus: 1
+    mem_limit: 384m
+    memswap_limit: 384m
+    pids_limit: 32
+    security_opt: !override ["no-new-privileges:true"]
+
   media:
     <<: *service
     build: !reset null

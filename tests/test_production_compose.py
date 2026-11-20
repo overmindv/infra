@@ -114,6 +114,32 @@ class ProductionComposeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "anonymous policy"):
                 self.check_app(self.model["app"])
 
+    def test_renderer_cannot_join_app_network(self):
+        model = copy.deepcopy(self.model["app"])
+        renderer = model["services"]["media-renderer"]
+        renderer["network_mode"] = None
+        renderer["networks"] = {"default": None}
+        with self.assertRaisesRegex(ValueError, "unexpected network"):
+            self.check_app(model)
+
+    def test_renderer_cannot_receive_credentials(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media-renderer"]["environment"] = {"S3_TOKEN": "fixture"}
+        with self.assertRaisesRegex(ValueError, "without credentials"):
+            self.check_app(model)
+
+    def test_renderer_cannot_disable_default_seccomp(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media-renderer"]["security_opt"].append("seccomp:unconfined")
+        with self.assertRaisesRegex(ValueError, "unprivileged resource-limited runtime"):
+            self.check_app(model)
+
+    def test_media_socket_mount_is_read_only(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["volumes"][0]["read_only"] = False
+        with self.assertRaisesRegex(ValueError, "unexpected renderer socket mount"):
+            self.check_app(model)
+
     def test_wrong_migration_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "release checksum"):
             deploy.check_migration(fixture_release(b"-- different"), self.migration)

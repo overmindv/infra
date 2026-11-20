@@ -32,6 +32,7 @@ APP_IMAGES = {
     "kafka-topics": "kafka",
     "minio": "minio",
     "media-buckets": "minio",
+    "media-renderer": "media",
     "clamav": "clamav",
 }
 PROJECTS = {"app": "overmindv-production", "runner": "overmindv-runner"}
@@ -44,6 +45,12 @@ POSTGRES_INIT = (ROOT / "deploy/postgres/init-roles.sql", "/docker-entrypoint-in
 POSTGRES_GRANTS = (ROOT / "deploy/postgres/runtime-grants.sql", "/app/runtime-grants.sql")
 MINIO_POLICIES = (ROOT / "deploy/minio", "/app/minio")
 PUBLIC_MEDIA_POLICY = MINIO_POLICIES[0] / "public-media.json"
+RENDERER_VOLUME = "media-renderer-socket"
+RENDERER_MOUNT = "/run/media-renderer"
+RENDERER_VOLUME_OPTS = {
+    "type": "tmpfs", "device": "tmpfs",
+    "o": "size=1m,mode=0750,uid=10002,gid=10003,nosuid,nodev,noexec",
+}
 MINIO_IDENTITIES = (
     ("media", "MEDIA_S3_ACCESS_KEY", "MEDIA_S3_SECRET_KEY", "ovm-media-"),
     ("sandbox", "SANDBOX_TESTS_ACCESS_KEY_ID", "SANDBOX_TESTS_SECRET_ACCESS_KEY", "ovm-tests-"),
@@ -281,6 +288,31 @@ def check_service_tokens(services, used_secrets):
         used_secrets.add(value)
 
 
+def check_media_renderer(services):
+    renderer = services["media-renderer"]
+    if (services["media"].get("user") != "10001:10003" or renderer.get("user") != "10002:10003"
+            or not renderer.get("read_only") or not renderer.get("init")
+            or renderer.get("entrypoint") != ["/usr/local/bin/media-renderer"] or renderer.get("command")
+            or renderer.get("cap_drop") != ["ALL"] or float(renderer["cpus"]) > 1
+            or renderer.get("security_opt") != ["no-new-privileges:true"]
+            or int(renderer["mem_limit"]) != 384 << 20
+            or int(renderer.get("memswap_limit", 0)) != 384 << 20
+            or not 1 <= int(renderer["pids_limit"]) <= 32
+            or renderer.get("tmpfs") != ["/tmp:rw,noexec,nosuid,nodev,size=96m,mode=0700,uid=10002,gid=10003"]
+            or any(renderer.get(name) for name in ("environment", "env_file", "secrets", "configs", "extra_hosts"))):
+        raise ValueError("media-renderer: expected unprivileged resource-limited runtime without credentials")
+    for name, service in services.items():
+        found = [entry for entry in service.get("volumes", []) if entry.get("source") == RENDERER_VOLUME]
+        if name not in ("media", "media-renderer"):
+            if found:
+                raise ValueError(f"{name}: cannot mount the renderer socket")
+            continue
+        if (len(service.get("volumes", [])) != 1 or len(found) != 1 or found[0].get("type") != "volume"
+                or found[0].get("target") != RENDERER_MOUNT or not found[0].get("volume", {}).get("nocopy")
+                or bool(found[0].get("read_only")) != (name == "media")):
+            raise ValueError(f"{name}: unexpected renderer socket mount")
+
+
 def check_model(model, target, images, migration=None, runner_tls=None):
     project = PROJECTS[target]
     services = model["services"]
@@ -293,7 +325,9 @@ def check_model(model, target, images, migration=None, runner_tls=None):
             or network["driver_opts"] != {"com.docker.network.bridge.gateway_mode_ipv4": "nat"}):
         raise ValueError(f"{target}: expected a separate bridge network")
     for name, volume in model.get("volumes", {}).items():
-        if (volume["name"] != f"{project}_{name}" or volume.get("external") or volume.get("driver_opts")):
+        expected_opts = RENDERER_VOLUME_OPTS if target == "app" and name == RENDERER_VOLUME else None
+        if (volume["name"] != f"{project}_{name}" or volume.get("external")
+                or volume.get("driver_opts") != expected_opts or (expected_opts and volume.get("driver") != "local")):
             raise ValueError(f"{name}: data volume must belong to the production project")
 
     mounts = {"sandbox-migrate": (migration, "/app/001_init_runs.sql"),
@@ -304,10 +338,13 @@ def check_model(model, target, images, migration=None, runner_tls=None):
     for name, service in services.items():
         if service["image"] != images[expected[name]] or service["platform"] != "linux/amd64":
             raise ValueError(f"{name}: image does not match the release")
-        if any(service.get(key) for key in ("build", "profiles", "network_mode", "pid", "ipc",
+        if any(service.get(key) for key in ("build", "profiles", "pid", "ipc",
                                             "devices", "volumes_from", "cap_add")):
             raise ValueError(f"{name}: local build, profile, or host access is enabled")
-        if set(service["networks"]) != {"default"} or bool(service.get("privileged")) != (target == "runner"):
+        offline = name == "media-renderer"
+        if (set(service.get("networks", {})) != (set() if offline else {"default"})
+                or service.get("network_mode") != ("none" if offline else None)
+                or bool(service.get("privileged")) != (target == "runner")):
             raise ValueError(f"{name}: unexpected network or privileges")
         if (not service.get("restart")
                 or any(float(service.get(key, 0)) <= 0 for key in ("mem_limit", "cpus", "pids_limit"))):
@@ -346,6 +383,7 @@ def check_model(model, target, images, migration=None, runner_tls=None):
         return
     if not must_wait_for(services["users"], "users-no-demo"):
         raise ValueError("users: demo account check must succeed before startup")
+    check_media_renderer(services)
     used_secrets = check_database_roles(services)
     email = services["users"]["environment"]["BOOTSTRAP_SUPERUSER_EMAIL"].lower()
     if "@" not in email or email.endswith((".local", ".invalid", ".test", ".example")):
