@@ -1,0 +1,32 @@
+name: overmindv-runner
+
+services:
+  gojudge:
+    image: ${RELEASE_GOJUDGE_IMAGE:?release manifest required}
+    platform: linux/amd64
+    # go-judge needs namespace and cgroup access. Run only on the dedicated VM.
+    privileged: true
+    command: ["-parallelism=1"]
+    ports:
+      - "127.0.0.1:15050:5050"
+    shm_size: 256m
+    cpus: 2
+    mem_limit: 3g
+    pids_limit: 640
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:5050/version"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.gateway_mode_ipv4: nat
