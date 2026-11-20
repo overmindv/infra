@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -11,6 +12,9 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_REF = re.compile(r"[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}")
+DNS_LABEL = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+PUBLIC_ORIGIN = re.compile(rf"https://(?:{DNS_LABEL}\.)+{DNS_LABEL}")
+PRIVATE_NETWORKS = tuple(map(ipaddress.IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
 APPS = (
     "api-gateway", "content", "entities", "feed", "frontend", "media",
     "recommendations", "sandbox", "task-hunter", "tasks", "users",
@@ -30,7 +34,7 @@ APP_IMAGES = {
 }
 PROJECTS = {"app": "overmindv-production", "runner": "overmindv-runner"}
 PORTS = {
-    "app": {"frontend": (13000, 3000), "minio": (19000, 9000)},
+    "app": {"frontend": (13000, 3000), "api-gateway": (18081, 8081), "minio": (19000, 9000)},
     "runner": {"gojudge": (15050, 5050)},
 }
 MIGRATION = "migrations/001_init_runs.sql"
@@ -64,8 +68,29 @@ def https_url(value, origin_only=False):
     url = urlsplit(value)
     return (
         url.scheme == "https" and url.hostname and not url.username and not url.password
-        and not url.query and not url.fragment and (not origin_only or url.path in ("", "/"))
+        and not url.query and not url.fragment and (not origin_only or not url.path)
     )
+
+
+def check_public_edge(network, gateway, object_origin):
+    config = network["ipam"]["config"]
+    if len(config) != 1:
+        raise ValueError("expected one production app bridge subnet")
+    subnet = ipaddress.IPv4Network(config[0]["subnet"])
+    address = ipaddress.IPv4Address(config[0]["gateway"])
+    if subnet.prefixlen > 26 or not any(subnet.subnet_of(private) for private in PRIVATE_NETWORKS):
+        raise ValueError("expected a private app bridge with at least 62 addresses")
+    if address not in subnet or address in (subnet.network_address, subnet.broadcast_address):
+        raise ValueError("bridge gateway is outside the usable subnet")
+    if (gateway["APP_ENV"] != "production" or gateway["SESSION_COOKIE_SECURE"] != "true"
+            or gateway["TRUSTED_PROXY_CIDRS"] != f"{address}/32"):
+        raise ValueError("gateway requires Secure cookies and the exact host proxy address")
+    web_origin = gateway["CORS_ORIGINS"]
+    if (not PUBLIC_ORIGIN.fullmatch(web_origin) or not PUBLIC_ORIGIN.fullmatch(object_origin)
+            or any(origin.endswith((".localhost", ".local", ".internal", ".invalid", ".test", ".example"))
+                   for origin in (web_origin, object_origin))
+            or web_origin == object_origin):
+        raise ValueError("expected one HTTPS frontend origin distinct from object storage")
 
 
 def check_model(model, target, images, migration=None):
@@ -135,10 +160,9 @@ def check_model(model, target, images, migration=None):
     media = services["media"]["environment"]
     if not (https_url(sandbox["SANDBOX_GOJUDGE_BASE_URL"], origin_only=True)
             and https_url(media["MEDIA_S3_PUBLIC_ENDPOINT"], origin_only=True)
-            and https_url(media["MEDIA_PUBLIC_BASE_URL"])
-            and all(https_url(origin.strip(), origin_only=True)
-                    for origin in services["api-gateway"]["environment"]["CORS_ORIGINS"].split(","))):
+            and https_url(media["MEDIA_PUBLIC_BASE_URL"])):
         raise ValueError("expected HTTPS URLs for the runner, media and frontend")
+    check_public_edge(network, services["api-gateway"]["environment"], media["MEDIA_S3_PUBLIC_ENDPOINT"])
     keys = {
         services["minio"]["environment"]["MINIO_ROOT_USER"],
         media["MEDIA_S3_ACCESS_KEY"],

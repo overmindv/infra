@@ -1,0 +1,154 @@
+{
+	admin off
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 5s
+			idle 1m
+		}
+	}
+	log {
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+(edge_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+}
+
+{$CORS_ORIGINS} {
+	import edge_headers
+	header Content-Security-Policy "base-uri 'self'; frame-ancestors 'none'; connect-src 'self' {$MEDIA_S3_PUBLIC_ENDPOINT}; form-action 'self' {$MEDIA_S3_PUBLIC_ENDPOINT}"
+
+	@internal path /internal /internal/* /playground /health /healthz /ready /readyz /metrics
+	route {
+		request_header -Forwarded
+		request_header -X-Forwarded-*
+		request_header -X-Real-IP
+		request_header -X-User-*
+		request_header -X-Actor-*
+		request_header -X-Login-Client-*
+		request_header -X-Media-Service-Token
+		request_header -X-Feed-Service-Token
+
+		respond @internal 404
+		handle /graphql {
+			reverse_proxy 127.0.0.1:18081 {
+				header_up X-Forwarded-Proto https
+			}
+		}
+		handle {
+			reverse_proxy 127.0.0.1:13000
+		}
+	}
+}
+
+(object_cors) {
+	header {
+		Access-Control-Allow-Origin "{$CORS_ORIGINS}"
+		Access-Control-Expose-Headers ETag
+		+Vary Origin
+		defer
+	}
+}
+
+(object_preflight) {
+	header {
+		Access-Control-Allow-Origin "{$CORS_ORIGINS}"
+		Access-Control-Allow-Methods "{args[0]}"
+		Access-Control-Allow-Headers "Content-Type, Range, X-Amz-Checksum-Sha256, X-Amz-Content-Sha256"
+		Access-Control-Max-Age "600"
+		+Vary Origin
+	}
+	respond 204
+}
+
+(object_upstream) {
+	import object_cors
+	reverse_proxy 127.0.0.1:19000 {
+		header_up -Cookie
+		header_up -Authorization
+		header_down -Access-Control-*
+	}
+}
+
+{$MEDIA_S3_PUBLIC_ENDPOINT} {
+	import edge_headers
+
+	@foreign_origin {
+		header Origin *
+		not header Origin "{$CORS_ORIGINS}"
+	}
+	@post_preflight {
+		path /media-quarantine /media-quarantine/
+		method OPTIONS
+		header Origin "{$CORS_ORIGINS}"
+		header Access-Control-Request-Method POST
+	}
+	@part_preflight {
+		path /media-quarantine/uploads/*
+		method OPTIONS
+		header Origin "{$CORS_ORIGINS}"
+		header Access-Control-Request-Method PUT
+	}
+	@read_preflight {
+		path /media/originals/* /media/variants/*
+		method OPTIONS
+		header Origin "{$CORS_ORIGINS}"
+		header Access-Control-Request-Method GET
+		header Access-Control-Request-Method HEAD
+	}
+	@post_object {
+		path /media-quarantine /media-quarantine/
+		method POST
+		header Origin "{$CORS_ORIGINS}"
+	}
+	@part_object {
+		path /media-quarantine/uploads/*
+		method PUT
+		header Origin "{$CORS_ORIGINS}"
+	}
+	@read_object {
+		path /media/originals/* /media/variants/*
+		method GET HEAD
+	}
+
+	route {
+		respond @foreign_origin 403
+		handle @post_preflight {
+			import object_preflight POST
+		}
+		handle @part_preflight {
+			import object_preflight PUT
+		}
+		handle @read_preflight {
+			import object_preflight "GET, HEAD"
+		}
+		handle @post_object {
+			request_body {
+				max_size 101MiB
+			}
+			import object_upstream
+		}
+		handle @part_object {
+			request_body {
+				max_size 101MiB
+			}
+			import object_upstream
+		}
+		handle @read_object {
+			import object_upstream
+		}
+		respond 404
+	}
+}

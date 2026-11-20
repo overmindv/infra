@@ -59,9 +59,9 @@ class ProductionComposeTest(unittest.TestCase):
             "MINIO_ROOT_PASSWORD=unused-fixture",
             "MEDIA_S3_ACCESS_KEY=fixture-media",
             "MEDIA_S3_SECRET_KEY=unused-fixture",
-            "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.invalid",
-            "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.invalid/media",
-            "CORS_ORIGINS=https://app.fixture.invalid",
+            "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.example.org",
+            "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.example.org/media",
+            "CORS_ORIGINS=https://app.fixture.example.org",
             "SANDBOX_WORKER_ID=fixture-worker",
             "SANDBOX_GOJUDGE_BASE_URL=https://runner.fixture.invalid",
             "SANDBOX_TESTS_ACCESS_KEY_ID=fixture-tests",
@@ -128,6 +128,18 @@ class ProductionComposeTest(unittest.TestCase):
         model = copy.deepcopy(self.model["app"])
         model["services"]["sandbox"]["environment"]["SANDBOX_GOJUDGE_BASE_URL"] = "http://fixture.invalid"
         with self.assertRaisesRegex(ValueError, "HTTPS URLs"):
+            deploy.check_model(model, "app", self.images["app"], self.migration)
+
+    def test_gateway_does_not_trust_the_full_subnet(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["api-gateway"]["environment"]["TRUSTED_PROXY_CIDRS"] = "172.29.163.0/24"
+        with self.assertRaisesRegex(ValueError, "exact host proxy address"):
+            deploy.check_model(model, "app", self.images["app"], self.migration)
+
+    def test_object_origin_cannot_share_the_web_hostname(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["environment"]["MEDIA_S3_PUBLIC_ENDPOINT"] = "https://app.fixture.example.org"
+        with self.assertRaisesRegex(ValueError, "origin distinct from object storage"):
             deploy.check_model(model, "app", self.images["app"], self.migration)
 
 

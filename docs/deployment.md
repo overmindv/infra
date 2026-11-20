@@ -101,11 +101,12 @@ Production overlay использует [теги слияния Compose](https:
 
 | Узел | Порт на хосте | Куда передает прокси |
 | --- | --- | --- |
-| Приложение | `127.0.0.1:13000` | Frontend и GraphQL |
+| Приложение | `127.0.0.1:13000` | Frontend |
+| Приложение | `127.0.0.1:18081` | Только `/graphql` |
 | Приложение | `127.0.0.1:19000` | S3 API для браузерных запросов, без консоли |
 | Runner | `127.0.0.1:15050` | API go-judge |
 
-На узле приложения внешние запросы принимает HTTPS-прокси. На runner прокси слушает
+На узле приложения внешние запросы принимает Caddy, см. раздел ниже. На runner прокси слушает
 только частный интерфейс и принимает запросы только от узла приложения. Sandbox worker
 использует HTTPS-адрес этого прокси. До запуска нужно настроить аутентификацию между
 узлами, firewall и TLS по [OVM-163](https://overmindv.atlassian.net/browse/OVM-163).
@@ -156,3 +157,55 @@ python3 scripts/production_compose.py app check \
 [OVM-176](https://overmindv.atlassian.net/browse/OVM-176), обязательную проверку
 загрузок в [OVM-174](https://overmindv.atlassian.net/browse/OVM-174). Состояние брокера
 и топиков сверяем с OVM-164 перед выпуском.
+
+## Публичный HTTPS
+
+Caddy 2.11.9 ставим на узел приложения как системный сервис. Указываем два DNS-имени,
+направленные на этот узел: веб и S3. Снаружи открываем TCP 443 и TCP 80 для
+получения сертификата и перенаправления на HTTPS. Порты Compose остаются на
+loopback. На runner этот Caddyfile не используем.
+
+В `/etc/overmindv/edge.env` нужны только две настройки, с такими же значениями как
+в `app.env`:
+
+```dotenv
+CORS_ORIGINS=https://learn.example.org
+MEDIA_S3_PUBLIC_ENDPOINT=https://files.example.org
+```
+
+Передаем этот файл через `EnvironmentFile=/etc/overmindv/edge.env` в секции
+`[Service]` systemd drop-in для Caddy. Копируем [правила Caddy](../deploy/caddy/public.Caddyfile)
+в `/etc/caddy/Caddyfile`. Проверяем перед перезапуском:
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+  --envfile /etc/overmindv/edge.env
+```
+
+Caddy получает и обновляет сертификаты через
+[автоматический HTTPS](https://caddyserver.com/docs/automatic-https). HTTP API
+администрирования Caddy выключен. Изменение Caddyfile применяем через перезапуск,
+а не через команду `caddy reload`. Ключи сертификатов остаются в каталоге данных
+сервиса Caddy, не в Compose и не в Git.
+
+Gateway работает в режиме `production` с Secure cookie и принимает
+`X-Forwarded-Proto` только от адреса bridge gateway приложения. По умолчанию это
+`172.29.163.1/32`. Если сеть пересекается с сетью провайдера или VPN, заранее
+выбираем непересекающиеся `PRODUCTION_APP_BRIDGE_SUBNET` и
+`PRODUCTION_APP_BRIDGE_GATEWAY`. Проверяем на целевой VM, что соединение от
+хостового Caddy приходит именно с этого адреса. Не расширяем доверие до всего
+подсета ради обхода проверки. Текущий Gateway считает квоту входа по IP
+транспортного peer, поэтому за прокси IP-квота общая для пользователей.
+
+Веб-вход убирает служебные actor-заголовки и формирует собственный
+`X-Forwarded-Proto`. До S3 доходят только browser POST/PUT в quarantine и
+GET/HEAD для объектов `originals` и `variants`. Для записи и preflight нужен
+origin веб-сайта. Host и query подписанных запросов сохраняются, cookie и
+браузерный bearer до S3 не доходят. Права и подпись проверяет сам MinIO.
+В логах Caddy не сохраняются заголовки и URI запросов. Публичные бакеты не нужны.
+
+Локальная проверка использует временный CA и не требует DNS или публичного ACME:
+
+```bash
+python3 tests/public_edge_smoke.py
+```

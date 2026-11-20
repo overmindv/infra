@@ -240,8 +240,12 @@ services:
     <<: *service
     build: !reset null
     image: ${RELEASE_API_GATEWAY_IMAGE:?release manifest required}
-    ports: !reset []
+    ports: !override
+      - "127.0.0.1:18081:8081"
     environment:
+      APP_ENV: production
+      SESSION_COOKIE_SECURE: "true"
+      TRUSTED_PROXY_CIDRS: ${PRODUCTION_APP_BRIDGE_GATEWAY:-172.29.163.1}/32
       CORS_ORIGINS: ${CORS_ORIGINS:?public HTTPS origin required}
       MEDIA_TOKEN: ${MEDIA_GATEWAY_TOKEN:?production service token required}
 
@@ -335,3 +339,7 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.gateway_mode_ipv4: nat
+    ipam:
+      config:
+        - subnet: ${PRODUCTION_APP_BRIDGE_SUBNET:-172.29.163.0/24}
+          gateway: ${PRODUCTION_APP_BRIDGE_GATEWAY:-172.29.163.1}
