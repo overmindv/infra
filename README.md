@@ -35,6 +35,11 @@ make up
 
 Если стандартный порт занят, измените только нужное значение в `.env`: `FRONTEND_PORT`, `API_GATEWAY_PORT`, `KAFKA_PORT`, `USERS_POSTGRES_PORT`, `ENTITIES_POSTGRES_PORT` или `TASKS_POSTGRES_PORT`.
 
+Для чтения черновиков и изменения каталога задайте `ENTITIES_GATEWAY_TOKEN`
+в локальном окружении Compose. Случайный токен получают только Gateway и
+Entities. Он должен отличаться от `ENTITIES_SNAPSHOT_TOKEN`. Без него
+работает только чтение опубликованного каталога.
+
 ## Основные команды
 
 ```bash

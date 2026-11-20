@@ -184,6 +184,7 @@ services:
       ENV: local
       LOG_LEVEL: info
       ENTITIES_SNAPSHOT_TOKEN: "${ENTITIES_SNAPSHOT_TOKEN:-}"
+      ENTITIES_GATEWAY_TOKEN: "${ENTITIES_GATEWAY_TOKEN:-}"
       DATABASE_URL: "postgres://entities:${ENTITIES_POSTGRES_PASSWORD}@entities-postgres:5432/entities?sslmode=disable"
     depends_on:
       entities-migrate:
@@ -528,6 +529,7 @@ services:
       USERS_HEALTH_URL: http://users:8080/health
       USERS_TIMEOUT: ${USERS_TIMEOUT:-5s}
       ENTITIES_URL: http://entities:8080
+      ENTITIES_GATEWAY_TOKEN: "${ENTITIES_GATEWAY_TOKEN:-}"
       ENTITIES_TIMEOUT: ${ENTITIES_TIMEOUT:-5s}
       TASKS_URL: http://tasks:8080
       TASKS_TIMEOUT: ${TASKS_TIMEOUT:-5s}
