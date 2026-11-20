@@ -54,6 +54,7 @@ class ProductionComposeTest(unittest.TestCase):
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
+            "MEDIA_ALLOW_UNSCANNED_LOCAL=true",
             "MINIO_ROOT_USER=fixture-root",
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
@@ -92,6 +93,18 @@ class ProductionComposeTest(unittest.TestCase):
         release["images"]["gojudge"] = "fixture.invalid/gojudge:latest"
         with self.assertRaisesRegex(ValueError, "manifest digest"):
             deploy.image_env(release, "runner")
+
+    def test_scan_bypass_is_rejected(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["environment"]["MEDIA_ALLOW_UNSCANNED_LOCAL"] = "true"
+        with self.assertRaisesRegex(ValueError, "scan bypass"):
+            self.check_app(model)
+
+    def test_clamav_must_report_incomplete_scans(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["clamav"]["environment"]["CLAMD_CONF_AlertExceedsMax"] = "no"
+        with self.assertRaisesRegex(ValueError, "scan limits"):
+            self.check_app(model)
 
     def test_wrong_migration_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "release checksum"):

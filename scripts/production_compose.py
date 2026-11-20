@@ -347,6 +347,18 @@ def check_model(model, target, images, migration=None, runner_tls=None):
     ):
         raise ValueError("sandbox: expected worker TLS files on the private read-only mount")
     media = services["media"]["environment"]
+    if media.get("ENV") != "production" or media.get("MEDIA_ALLOW_UNSCANNED_LOCAL") != "false":
+        raise ValueError("media: scan bypass is forbidden in production")
+    scanner = services["clamav"].get("environment", {})
+    if any(scanner.get(key) != value for key, value in {
+        "CLAMD_CONF_StreamMaxLength": "251M",
+        "CLAMD_CONF_MaxFileSize": "250M",
+        "CLAMD_CONF_MaxScanSize": "500M",
+        "CLAMD_CONF_AlertExceedsMax": "yes",
+        "CLAMD_CONF_AlertEncrypted": "yes",
+        "CLAMD_CONF_MaxThreads": "2",
+    }.items()):
+        raise ValueError("clamav: expected the production scan limits")
     if not (https_url(sandbox["SANDBOX_GOJUDGE_BASE_URL"], origin_only=True)
             and https_url(media["MEDIA_S3_PUBLIC_ENDPOINT"], origin_only=True)
             and https_url(media["MEDIA_PUBLIC_BASE_URL"])):

@@ -497,6 +497,7 @@ services:
       DATABASE_URL: postgres://overmind_app:${MEDIA_POSTGRES_PASSWORD:?production database password required}@media-postgres:5432/media?sslmode=disable
       ENV: production
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?production service token required}
+      MEDIA_ALLOW_UNSCANNED_LOCAL: "false"
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:?production service token required}
       MEDIA_S3_PUBLIC_ENDPOINT: ${MEDIA_S3_PUBLIC_ENDPOINT:?public HTTPS S3 endpoint required}
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?public HTTPS media URL required}
@@ -506,7 +507,7 @@ services:
       media-grants:
         condition: service_completed_successfully
       clamav:
-        condition: service_healthy
+        condition: service_started
 
   api-gateway:
     <<: *service
