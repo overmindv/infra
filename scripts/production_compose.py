@@ -24,6 +24,7 @@ DATABASES = tuple(name for name in APPS if name not in ("api-gateway", "frontend
 APP_IMAGES = {
     **{name: name for name in APPS},
     **{f"{name}-postgres": "postgres" for name in DATABASES},
+    **{f"{name}-grants": "postgres" for name in DATABASES},
     **{f"{name}-migrate": name for name in DATABASES if name != "sandbox"},
     "sandbox-migrate": "postgres",
     "users-no-demo": "postgres",
@@ -39,12 +40,33 @@ PORTS = {
     "runner": {"gojudge": (15050, 5050)},
 }
 MIGRATION = "migrations/001_init_runs.sql"
+POSTGRES_INIT = (ROOT / "deploy/postgres/init-roles.sql", "/docker-entrypoint-initdb.d/20-roles.sql")
+POSTGRES_GRANTS = (ROOT / "deploy/postgres/runtime-grants.sql", "/app/runtime-grants.sql")
 RUNNER_TLS_PATH = "/run/sandbox/gojudge-tls"
 RUNNER_TLS_FILES = {
     "SANDBOX_GOJUDGE_TLS_CA_FILE": "runner-ca.pem",
     "SANDBOX_GOJUDGE_TLS_CERT_FILE": "worker.pem",
     "SANDBOX_GOJUDGE_TLS_KEY_FILE": "worker-key.pem",
 }
+
+
+def check_private_env(path):
+    if os.name != "posix":
+        raise ValueError("production secrets require a Linux application host")
+    if path.is_symlink():
+        raise ValueError("app env file must not be a symlink")
+    resolved = path.resolve(strict=True)
+    metadata = resolved.lstat()
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o600):
+        raise ValueError("app env file must be a regular root-owned file with mode 0600")
+    if resolved.is_relative_to(ROOT):
+        raise ValueError("app env file must be outside the repository")
+    for directory in resolved.parents:
+        metadata = directory.stat()
+        if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+            raise ValueError("app env parent directories must be root-owned and not writable by group or others")
+    return resolved
 
 
 def image_env(manifest, target):
@@ -119,6 +141,66 @@ def check_public_edge(network, gateway, object_origin):
         raise ValueError("expected one HTTPS frontend origin distinct from object storage")
 
 
+def must_wait_for(service, job):
+    dependency = service.get("depends_on", {}).get(job, {})
+    return dependency.get("condition") == "service_completed_successfully" and dependency.get("required", True)
+
+
+def check_database_roles(services):
+    used_passwords = set()
+    for name in DATABASES:
+        db = name.replace("-", "_")
+        host = f"{name}-postgres"
+        init = services[host]["environment"]
+        admin, migrator, app = (init[key] for key in (
+            "POSTGRES_PASSWORD", "OVM_DB_MIGRATOR_PASSWORD", "OVM_DB_APP_PASSWORD",
+        ))
+        candidates = (admin, migrator, app)
+        if any(not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{32,128}", value)
+               for value in candidates):
+            raise ValueError(f"{host}: use random hex passwords for the three database roles")
+        if len(set(candidates)) != 3 or used_passwords.intersection(candidates):
+            raise ValueError(f"{host}: database credentials must not be reused")
+        used_passwords.update(candidates)
+        if (init["POSTGRES_USER"], init["POSTGRES_DB"], init["POSTGRES_INITDB_ARGS"]) != (
+            "postgres", db, "--auth-local=peer --auth-host=scram-sha-256",
+        ):
+            raise ValueError(f"{host}: unexpected database bootstrap settings")
+        data_mounts = [volume for volume in services[host]["volumes"] if volume["type"] == "volume"]
+        if len(data_mounts) != 1 or (
+            data_mounts[0]["source"], data_mounts[0]["target"]
+        ) != (host, "/var/lib/postgresql/data"):
+            raise ValueError(f"{host}: unexpected database data volume")
+
+        migrator_name = f"{name}-migrate"
+        grants = f"{name}-grants"
+        pg_migrator = {"PGUSER": "overmind_migrator", "PGHOST": host, "PGDATABASE": db, "PGPASSWORD": migrator}
+        job = services[migrator_name]["environment"]
+        valid_migration = (
+            all(job.get(key) == value for key, value in pg_migrator.items()) if name == "sandbox"
+            else job.get("DATABASE_URL") == f"postgres://overmind_migrator:{migrator}@{host}:5432/{db}?sslmode=disable"
+        )
+        if not valid_migration or any(
+            services[grants]["environment"].get(key) != value for key, value in pg_migrator.items()
+        ):
+            raise ValueError(f"{name}: migration and grants must use the migration role")
+        app_var = "SANDBOX_POSTGRES_DSN" if name == "sandbox" else "DATABASE_URL"
+        if services[name]["environment"].get(app_var) != (
+            f"postgres://overmind_app:{app}@{host}:5432/{db}?sslmode=disable"
+        ):
+            raise ValueError(f"{name}: app must use the runtime database role")
+        if not must_wait_for(services[grants], migrator_name) or not must_wait_for(services[name], grants):
+            raise ValueError(f"{name}: migrations and grants must finish before runtime starts")
+    gate = services["users-no-demo"]
+    if not must_wait_for(gate, "users-grants") or any(
+        gate["environment"].get(key) != value for key, value in {
+            "PGUSER": "overmind_app", "PGHOST": "users-postgres", "PGDATABASE": "users",
+            "PGPASSWORD": services["users-postgres"]["environment"]["OVM_DB_APP_PASSWORD"],
+        }.items()
+    ):
+        raise ValueError("users: the demo account check must use the runtime role after grants")
+
+
 def check_model(model, target, images, migration=None, runner_tls=None):
     project = PROJECTS[target]
     services = model["services"]
@@ -135,7 +217,9 @@ def check_model(model, target, images, migration=None, runner_tls=None):
             raise ValueError(f"{name}: data volume must belong to the production project")
 
     mounts = {"sandbox-migrate": (migration, "/app/001_init_runs.sql"),
-              "sandbox": (runner_tls, RUNNER_TLS_PATH)}
+              "sandbox": (runner_tls, RUNNER_TLS_PATH),
+              **{f"{name}-postgres": POSTGRES_INIT for name in DATABASES},
+              **{f"{name}-grants": POSTGRES_GRANTS for name in DATABASES}}
     for name, service in services.items():
         if service["image"] != images[expected[name]] or service["platform"] != "linux/amd64":
             raise ValueError(f"{name}: image does not match the release")
@@ -179,8 +263,9 @@ def check_model(model, target, images, migration=None, runner_tls=None):
         if services["gojudge"]["command"] != ["-parallelism=1"]:
             raise ValueError("runner: expected one execution slot")
         return
-    if services["users"]["depends_on"]["users-no-demo"]["condition"] != "service_completed_successfully":
+    if not must_wait_for(services["users"], "users-no-demo"):
         raise ValueError("users: demo account check must succeed before startup")
+    check_database_roles(services)
     email = services["users"]["environment"]["BOOTSTRAP_SUPERUSER_EMAIL"].lower()
     if "@" not in email or email.endswith((".local", ".invalid", ".test", ".example")):
         raise ValueError("users: expected an explicit administrator email")
@@ -205,10 +290,6 @@ def check_model(model, target, images, migration=None, runner_tls=None):
     }
     if len(keys) != 4:
         raise ValueError("MinIO, media, tests and artifacts must use separate access keys")
-    for name in DATABASES:
-        password = services[f"{name}-postgres"]["environment"]["POSTGRES_PASSWORD"]
-        if not re.fullmatch(r"[a-f0-9]{32,}", password):
-            raise ValueError(f"{name}-postgres: use a random hex password for the connection URL")
 
 
 def compose_args(target, env_file):
@@ -285,7 +366,8 @@ def main():
         runner_tls = None
         env_file = None
         if args.target == "app":
-            env_file = args.env_file.resolve(strict=True)
+            env_file = (check_private_env(args.env_file) if args.action == "up"
+                        else args.env_file.resolve(strict=True))
             migration = args.sandbox_migration.resolve(strict=True)
             check_migration(manifest, migration)
             runner_tls = args.runner_tls_dir.resolve(strict=True)

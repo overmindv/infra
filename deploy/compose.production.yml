@@ -22,6 +22,42 @@ x-postgres: &postgres
   <<: *service
   image: ${RELEASE_POSTGRES_IMAGE:?release manifest required}
   ports: !reset []
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -q -h 127.0.0.1 -U postgres -d \"$$POSTGRES_DB\""]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+
+x-postgres-env: &postgres-env
+  POSTGRES_USER: postgres
+  POSTGRES_INITDB_ARGS: "--auth-local=peer --auth-host=scram-sha-256"
+
+x-postgres-mount: &postgres-mount
+  type: bind
+  source: ./deploy/postgres/init-roles.sql
+  target: /docker-entrypoint-initdb.d/20-roles.sql
+  read_only: true
+  bind:
+    create_host_path: false
+
+x-db-grants: &db-grants
+  <<: *job
+  image: ${RELEASE_POSTGRES_IMAGE:?release manifest required}
+  user: postgres
+  mem_limit: 48m
+  entrypoint: ["psql", "-X", "-w", "-v", "ON_ERROR_STOP=1", "-f", "/app/runtime-grants.sql"]
+  volumes:
+    - type: bind
+      source: ./deploy/postgres/runtime-grants.sql
+      target: /app/runtime-grants.sql
+      read_only: true
+      bind:
+        create_host_path: false
+
+x-db-grants-env: &db-grants-env
+  PGUSER: overmind_migrator
+  PGCONNECT_TIMEOUT: "5"
+  PGOPTIONS: "-c statement_timeout=10000"
 
 services:
   kafka-ui: !reset null
@@ -45,19 +81,199 @@ services:
     environment:
       KAFKA_HEAP_OPTS: "-Xms64m -Xmx192m"
 
-  users-postgres: *postgres
-  entities-postgres: *postgres
-  tasks-postgres: *postgres
-  feed-postgres: *postgres
-  task-hunter-postgres: *postgres
-  recommendations-postgres: *postgres
-  content-postgres: *postgres
-  media-postgres: *postgres
+  users-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: users
+      POSTGRES_PASSWORD: ${USERS_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${USERS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${USERS_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  entities-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: entities
+      POSTGRES_PASSWORD: ${ENTITIES_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${ENTITIES_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${ENTITIES_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  tasks-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: tasks
+      POSTGRES_PASSWORD: ${TASKS_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${TASKS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${TASKS_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  feed-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: feed
+      POSTGRES_PASSWORD: ${FEED_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${FEED_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${FEED_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  task-hunter-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: task_hunter
+      POSTGRES_PASSWORD: ${TASK_HUNTER_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${TASK_HUNTER_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${TASK_HUNTER_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  recommendations-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: recommendations
+      POSTGRES_PASSWORD: ${RECOMMENDATIONS_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${RECOMMENDATIONS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${RECOMMENDATIONS_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  content-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: content
+      POSTGRES_PASSWORD: ${CONTENT_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${CONTENT_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${CONTENT_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  media-postgres:
+    <<: *postgres
+    environment:
+      <<: *postgres-env
+      POSTGRES_DB: media
+      POSTGRES_PASSWORD: ${MEDIA_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${MEDIA_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${MEDIA_POSTGRES_PASSWORD:?production database password required}
+    volumes:
+      - *postgres-mount
+
+  users-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: users-postgres
+      PGDATABASE: users
+      PGPASSWORD: ${USERS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      users-migrate:
+        condition: service_completed_successfully
+
+  entities-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: entities-postgres
+      PGDATABASE: entities
+      PGPASSWORD: ${ENTITIES_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      entities-migrate:
+        condition: service_completed_successfully
+
+  tasks-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: tasks-postgres
+      PGDATABASE: tasks
+      PGPASSWORD: ${TASKS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      tasks-migrate:
+        condition: service_completed_successfully
+
+  feed-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: feed-postgres
+      PGDATABASE: feed
+      PGPASSWORD: ${FEED_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      feed-migrate:
+        condition: service_completed_successfully
+
+  task-hunter-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: task-hunter-postgres
+      PGDATABASE: task_hunter
+      PGPASSWORD: ${TASK_HUNTER_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      task-hunter-migrate:
+        condition: service_completed_successfully
+
+  recommendations-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: recommendations-postgres
+      PGDATABASE: recommendations
+      PGPASSWORD: ${RECOMMENDATIONS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      recommendations-migrate:
+        condition: service_completed_successfully
+
+  content-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: content-postgres
+      PGDATABASE: content
+      PGPASSWORD: ${CONTENT_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      content-migrate:
+        condition: service_completed_successfully
+
+  media-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: media-postgres
+      PGDATABASE: media
+      PGPASSWORD: ${MEDIA_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      media-migrate:
+        condition: service_completed_successfully
+
+  sandbox-grants:
+    <<: *db-grants
+    environment:
+      <<: *db-grants-env
+      PGHOST: sandbox-postgres
+      PGDATABASE: sandbox
+      PGPASSWORD: ${SANDBOX_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+    depends_on:
+      sandbox-migrate:
+        condition: service_completed_successfully
 
   users-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_USERS_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${USERS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@users-postgres:5432/users?sslmode=disable
 
   users-no-demo:
     <<: *job
@@ -77,13 +293,13 @@ services:
         fi
     environment:
       PGHOST: users-postgres
-      PGUSER: ${USERS_POSTGRES_USER:-postgres}
-      PGDATABASE: ${USERS_POSTGRES_DB:-users}
+      PGUSER: overmind_app
+      PGDATABASE: users
       PGPASSWORD: ${USERS_POSTGRES_PASSWORD:?production database password required}
       PGCONNECT_TIMEOUT: "5"
       PGOPTIONS: "-c statement_timeout=5000"
     depends_on:
-      users-migrate:
+      users-grants:
         condition: service_completed_successfully
 
   users:
@@ -92,10 +308,13 @@ services:
     image: ${RELEASE_USERS_IMAGE:?release manifest required}
     mem_limit: 768m
     environment:
+      DATABASE_URL: postgres://overmind_app:${USERS_POSTGRES_PASSWORD:?production database password required}@users-postgres:5432/users?sslmode=disable
       ENV: production
       BOOTSTRAP_SUPERUSER_EMAIL: ${BOOTSTRAP_SUPERUSER_EMAIL:?production administrator email required}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:?production service token required}
     depends_on:
+      users-grants:
+        condition: service_completed_successfully
       users-no-demo:
         condition: service_completed_successfully
 
@@ -103,6 +322,8 @@ services:
     <<: *job
     build: !reset null
     image: ${RELEASE_ENTITIES_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${ENTITIES_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@entities-postgres:5432/entities?sslmode=disable
 
   entities:
     <<: *service
@@ -110,24 +331,36 @@ services:
     image: ${RELEASE_ENTITIES_IMAGE:?release manifest required}
     ports: !reset []
     environment:
+      DATABASE_URL: postgres://overmind_app:${ENTITIES_POSTGRES_PASSWORD:?production database password required}@entities-postgres:5432/entities?sslmode=disable
       ENV: production
+    depends_on:
+      entities-grants:
+        condition: service_completed_successfully
 
   tasks-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_TASKS_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${TASKS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@tasks-postgres:5432/tasks?sslmode=disable
 
   tasks:
     <<: *service
     build: !reset null
     image: ${RELEASE_TASKS_IMAGE:?release manifest required}
     environment:
+      DATABASE_URL: postgres://overmind_app:${TASKS_POSTGRES_PASSWORD:?production database password required}@tasks-postgres:5432/tasks?sslmode=disable
       ENV: production
+    depends_on:
+      tasks-grants:
+        condition: service_completed_successfully
 
   feed-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_FEED_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${FEED_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@feed-postgres:5432/feed?sslmode=disable
 
   feed:
     <<: *service
@@ -135,12 +368,18 @@ services:
     image: ${RELEASE_FEED_IMAGE:?release manifest required}
     ports: !reset []
     environment:
+      DATABASE_URL: postgres://overmind_app:${FEED_POSTGRES_PASSWORD:?production database password required}@feed-postgres:5432/feed?sslmode=disable
       ENV: production
+    depends_on:
+      feed-grants:
+        condition: service_completed_successfully
 
   task-hunter-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_TASK_HUNTER_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${TASK_HUNTER_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@task-hunter-postgres:5432/task_hunter?sslmode=disable
 
   task-hunter:
     <<: *service
@@ -149,6 +388,7 @@ services:
     user: !reset null
     volumes: !reset []
     environment:
+      DATABASE_URL: postgres://overmind_app:${TASK_HUNTER_POSTGRES_PASSWORD:?production database password required}@task-hunter-postgres:5432/task_hunter?sslmode=disable
       ENV: production
       PARSER_TELEGRAM_ENABLED: "false"
       PARSER_TELEGRAM_APIID: !reset null
@@ -157,21 +397,33 @@ services:
       TELEGRAM_API_HASH: !reset null
       TELEGRAM_PHONE: !reset null
       TELEGRAM_2FA_PASSWORD: !reset null
+    depends_on:
+      task-hunter-grants:
+        condition: service_completed_successfully
 
   recommendations-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_RECOMMENDATIONS_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${RECOMMENDATIONS_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@recommendations-postgres:5432/recommendations?sslmode=disable
 
   recommendations:
     <<: *service
     build: !reset null
     image: ${RELEASE_RECOMMENDATIONS_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_app:${RECOMMENDATIONS_POSTGRES_PASSWORD:?production database password required}@recommendations-postgres:5432/recommendations?sslmode=disable
+    depends_on:
+      recommendations-grants:
+        condition: service_completed_successfully
 
   content-migrate:
     <<: *job
     build: !reset null
     image: ${RELEASE_CONTENT_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${CONTENT_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@content-postgres:5432/content?sslmode=disable
 
   content:
     <<: *service
@@ -179,7 +431,11 @@ services:
     image: ${RELEASE_CONTENT_IMAGE:?release manifest required}
     ports: !reset []
     environment:
+      DATABASE_URL: postgres://overmind_app:${CONTENT_POSTGRES_PASSWORD:?production database password required}@content-postgres:5432/content?sslmode=disable
       ENV: production
+    depends_on:
+      content-grants:
+        condition: service_completed_successfully
 
   minio:
     <<: *service
@@ -217,6 +473,8 @@ services:
     <<: *job
     build: !reset null
     image: ${RELEASE_MEDIA_IMAGE:?release manifest required}
+    environment:
+      DATABASE_URL: postgres://overmind_migrator:${MEDIA_POSTGRES_MIGRATOR_PASSWORD:?production database password required}@media-postgres:5432/media?sslmode=disable
 
   media:
     <<: *service
@@ -225,6 +483,7 @@ services:
     mem_limit: 512m
     ports: !reset []
     environment:
+      DATABASE_URL: postgres://overmind_app:${MEDIA_POSTGRES_PASSWORD:?production database password required}@media-postgres:5432/media?sslmode=disable
       ENV: production
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?production service token required}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:?production service token required}
@@ -233,6 +492,8 @@ services:
       MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?limited S3 access key required}
       MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:?limited S3 secret key required}
     depends_on:
+      media-grants:
+        condition: service_completed_successfully
       clamav:
         condition: service_healthy
 
@@ -259,16 +520,14 @@ services:
   sandbox-postgres:
     <<: *postgres
     environment:
-      POSTGRES_USER: sandbox
+      <<: *postgres-env
       POSTGRES_DB: sandbox
-      POSTGRES_PASSWORD: ${SANDBOX_POSTGRES_PASSWORD:?production database password required}
+      POSTGRES_PASSWORD: ${SANDBOX_POSTGRES_ADMIN_PASSWORD:?production database password required}
+      OVM_DB_MIGRATOR_PASSWORD: ${SANDBOX_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
+      OVM_DB_APP_PASSWORD: ${SANDBOX_POSTGRES_PASSWORD:?production database password required}
     volumes:
       - sandbox-postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "sandbox", "-d", "sandbox"]
-      interval: 2s
-      timeout: 3s
-      retries: 30
+      - *postgres-mount
 
   sandbox-migrate:
     <<: *job
@@ -278,9 +537,9 @@ services:
     command: ["-X", "-v", "ON_ERROR_STOP=1", "-1", "-f", "/app/001_init_runs.sql"]
     environment:
       PGHOST: sandbox-postgres
-      PGUSER: sandbox
+      PGUSER: overmind_migrator
       PGDATABASE: sandbox
-      PGPASSWORD: ${SANDBOX_POSTGRES_PASSWORD:?production database password required}
+      PGPASSWORD: ${SANDBOX_POSTGRES_MIGRATOR_PASSWORD:?production database password required}
       PGCONNECT_TIMEOUT: "5"
     volumes:
       - type: bind
@@ -316,7 +575,7 @@ services:
       SANDBOX_MAX_IN_FLIGHT: "1"
       SANDBOX_PYTHON_MAX_IN_FLIGHT: "1"
       SANDBOX_SCHEDULER_QUEUE_MAX_DEPTH: "16"
-      SANDBOX_POSTGRES_DSN: postgres://sandbox:${SANDBOX_POSTGRES_PASSWORD:?production database password required}@sandbox-postgres:5432/sandbox?sslmode=disable
+      SANDBOX_POSTGRES_DSN: postgres://overmind_app:${SANDBOX_POSTGRES_PASSWORD:?production database password required}@sandbox-postgres:5432/sandbox?sslmode=disable
       SANDBOX_TESTS_BUCKET: sandbox-tests
       SANDBOX_TESTS_ENDPOINT: http://minio:9000
       SANDBOX_TESTS_REGION: us-east-1
@@ -337,7 +596,7 @@ services:
         bind:
           create_host_path: false
     depends_on:
-      sandbox-migrate:
+      sandbox-grants:
         condition: service_completed_successfully
       media-buckets:
         condition: service_completed_successfully

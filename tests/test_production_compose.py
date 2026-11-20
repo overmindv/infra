@@ -44,8 +44,9 @@ class ProductionComposeTest(unittest.TestCase):
         cls.release = fixture_release(sql)
         fixture = root / "app.env"
         passwords = [
-            f"{name.upper().replace('-', '_')}_POSTGRES_PASSWORD={'a' * 32}"
-            for name in deploy.DATABASES
+            f"{name.upper().replace('-', '_')}_POSTGRES_{role}={index * 3 + offset + 1:032x}"
+            for index, name in enumerate(deploy.DATABASES)
+            for offset, role in enumerate(("PASSWORD", "ADMIN_PASSWORD", "MIGRATOR_PASSWORD"))
         ]
         fixture.write_text("\n".join([
             *passwords,
@@ -170,6 +171,33 @@ class ProductionComposeTest(unittest.TestCase):
                 (directory / name).write_bytes(b"unused-fixture\n")
             with self.assertRaisesRegex(ValueError, "must contain only"):
                 deploy.check_runner_tls_files(directory)
+
+    def test_database_roles_need_distinct_passwords(self):
+        model = copy.deepcopy(self.model["app"])
+        env = model["services"]["tasks-postgres"]["environment"]
+        env["POSTGRES_PASSWORD"] = env["OVM_DB_APP_PASSWORD"]
+        with self.assertRaisesRegex(ValueError, "credentials must not be reused"):
+            self.check_app(model)
+
+    def test_runtime_cannot_use_the_migration_dsn(self):
+        model = copy.deepcopy(self.model["app"])
+        services = model["services"]
+        services["feed"]["environment"]["DATABASE_URL"] = services["feed-migrate"]["environment"]["DATABASE_URL"]
+        with self.assertRaisesRegex(ValueError, "runtime database role"):
+            self.check_app(model)
+
+    def test_runtime_must_wait_for_grants(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["content"]["depends_on"]["content-grants"]["required"] = False
+        with self.assertRaisesRegex(ValueError, "grants must finish"):
+            self.check_app(model)
+
+    def test_database_cannot_use_another_services_data_volume(self):
+        model = copy.deepcopy(self.model["app"])
+        data = next(volume for volume in model["services"]["media-postgres"]["volumes"] if volume["type"] == "volume")
+        data["source"] = "users-postgres"
+        with self.assertRaisesRegex(ValueError, "unexpected database data volume"):
+            self.check_app(model)
 
 
 if __name__ == "__main__":
