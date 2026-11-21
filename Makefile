@@ -24,7 +24,7 @@ help:
 	@echo "make kafka-check    Проверить создание topic'ов и обмен сообщениями"
 	@echo "make credentials    Показать URL и локального администратора"
 	@echo "make telegram-login Создать опциональную Telegram session"
-	@echo "make update         Обновить все сервисные репозитории из их удалённых default-веток"
+	@echo "make update         Обновить main всех репозиториев и синхронизировать CodeGraph"
 	@echo "make agent-context  Контекст репозиториев без секретов (опционально SERVICE=tasks)"
 	@echo "make agent-check    Проверить инструкции и команды (STRICT=1 требует все репозитории)"
 	@echo "make agent-verify SERVICE=tasks DRY_RUN=1  Показать план проверок выбранного сервиса"
@@ -83,10 +83,10 @@ credentials: init
 telegram-login: init
 	@./scripts/telegram-login.sh $(ENV_FILE)
 
-# Обновление всех сервисных репозиториев (overmindv + сервисы) из их удалённых default-веток
-# Доп. флаги: UPDATE_BRANCH=main  (форсировать ветку), UNDATE_FORCE=1 (reset --hard)
+# Безопасное обновление репозиториев из manifest и последующая синхронизация CodeGraph.
+# Доп. флаги: UPDATE_BRANCH=main (ветка для всех репозиториев), DRY=1 (только план).
 update:
-	@./scripts/update-repos.sh $(if $(UPDATE_BRANCH),--branch $(UPDATE_BRANCH)) $(if $(UPDATE_FORCE),--force) $(if $(DRY),--dry-run)
+	@./scripts/update-repos.sh $(if $(UPDATE_BRANCH),--branch $(UPDATE_BRANCH)) $(if $(DRY),--dry-run)
 
 # Сборка production-образов
 build:
