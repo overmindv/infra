@@ -146,6 +146,21 @@ class UpdateReposTests(unittest.TestCase):
         self.assertIn("service:", result.stdout)
         self.assertNotIn("sandbox:", result.stdout)
 
+    def test_invalid_workspace_manifest_stops_before_any_update(self):
+        infra, _ = self.create_repo("infra")
+        service, service_seed = self.create_repo("service")
+        self.advance_remote(service_seed)
+        (infra / "agent-services.json").write_text("not-json\n")
+        self.git(infra, "add", "agent-services.json")
+        self.git(infra, "commit", "-m", "invalid manifest")
+
+        result = self.run_update()
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("agent-services.json", result.stderr)
+        self.assertEqual((service / "state.txt").read_text(), "initial\n")
+        self.assertFalse(self.codegraph_log.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

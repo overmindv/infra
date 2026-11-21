@@ -61,7 +61,12 @@ repos=()
 manifest="$ROOT/infra/agent-services.json"
 scope_failed=0
 if [ -f "$manifest" ]; then
+  if ! manifest_names=$(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1]))["services"]))' "$manifest"); then
+    echo "Не удалось прочитать $manifest; обновление не начато" >&2
+    exit 1
+  fi
   while IFS= read -r name; do
+    [ -n "$name" ] || continue
     repo="$ROOT/$name"
     if git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       repos+=("$repo")
@@ -69,7 +74,7 @@ if [ -f "$manifest" ]; then
       echo "! $name: репозиторий из agent-services.json отсутствует" >&2
       scope_failed=1
     fi
-  done < <(python3 -c 'import json, sys; print("\n".join(json.load(open(sys.argv[1]))["services"]))' "$manifest")
+  done <<< "$manifest_names"
 else
   if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     repos+=("$ROOT")
