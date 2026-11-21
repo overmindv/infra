@@ -21,7 +21,6 @@ x-job: &job
 x-postgres: &postgres
   <<: *service
   image: ${RELEASE_POSTGRES_IMAGE:?release manifest required}
-  ports: !reset []
 
 services:
   kafka-ui: !reset null
@@ -53,14 +52,37 @@ services:
     environment:
       KAFKA_HEAP_OPTS: "-Xms64m -Xmx192m"
 
-  users-postgres: *postgres
-  entities-postgres: *postgres
-  tasks-postgres: *postgres
-  feed-postgres: *postgres
-  task-hunter-postgres: *postgres
-  recommendations-postgres: *postgres
-  content-postgres: *postgres
-  media-postgres: *postgres
+  users-postgres:
+    <<: *postgres
+    ports: !override []
+
+  entities-postgres:
+    <<: *postgres
+    ports: !override []
+
+  tasks-postgres:
+    <<: *postgres
+    ports: !override []
+
+  feed-postgres:
+    <<: *postgres
+    ports: !override []
+
+  task-hunter-postgres:
+    <<: *postgres
+    ports: !override []
+
+  recommendations-postgres:
+    <<: *postgres
+    ports: !override []
+
+  content-postgres:
+    <<: *postgres
+    ports: !override []
+
+  media-postgres:
+    <<: *postgres
+    ports: !override []
 
   users-migrate:
     <<: *job
