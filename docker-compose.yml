@@ -649,6 +649,26 @@ services:
       start_period: 5s
     restart: unless-stopped
 
+  catalog-bootstrap:
+    image: python:3.13-alpine
+    entrypoint: ["python", "/app/scripts/bootstrap_catalog.py"]
+    environment:
+      BOOTSTRAP_SUPERUSER_EMAIL: ${BOOTSTRAP_SUPERUSER_EMAIL:-admin@overmindv.local}
+      BOOTSTRAP_SUPERUSER_PASSWORD: ${BOOTSTRAP_SUPERUSER_PASSWORD:?set BOOTSTRAP_SUPERUSER_PASSWORD in .env}
+      CATALOG_BOOTSTRAP_ENABLED: ${CATALOG_BOOTSTRAP_ENABLED:-true}
+      CATALOG_IMPORT_EXTERNAL: ${CATALOG_IMPORT_EXTERNAL:-true}
+    volumes:
+      - ./scripts/bootstrap_catalog.py:/app/scripts/bootstrap_catalog.py:ro
+      - ./data:/app/data:ro
+      - catalog-bootstrap-state:/state
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: "no"
+
   frontend:
     build:
       context: ../frontend
@@ -922,6 +942,7 @@ networks:
     internal: true
 
 volumes:
+  catalog-bootstrap-state:
   kafka-data:
   users-postgres:
   entities-postgres:

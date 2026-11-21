@@ -166,3 +166,11 @@ agent-harness-test:
 .PHONY: recommendations-contract
 recommendations-contract:
 	@$(PYTHON) tests/recommendations_contract.py
+
+.PHONY: bootstrap bootstrap-test
+# Повторный запуск безопасен; внешние задания видны в интерфейсе модератора.
+bootstrap:
+	$(COMPOSE) run --rm --no-deps catalog-bootstrap
+
+bootstrap-test:
+	$(PYTHON) -m unittest discover -s scripts/tests
