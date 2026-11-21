@@ -54,6 +54,7 @@ class ProductionComposeTest(unittest.TestCase):
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
+            "MEDIA_ENABLE_UPLOAD_CLEANUP=true",
             "MINIO_ROOT_USER=fixture-root",
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
@@ -220,6 +221,12 @@ class ProductionComposeTest(unittest.TestCase):
         model = copy.deepcopy(self.model["app"])
         model["services"]["media"]["environment"]["MINIO_ROOT_PASSWORD"] = "unexpected"
         with self.assertRaisesRegex(ValueError, "root credentials must stay out"):
+            self.check_app(model)
+
+    def test_upload_cleanup_requires_retention_rules(self):
+        model = copy.deepcopy(self.model["app"])
+        model["services"]["media"]["environment"]["MEDIA_ENABLE_UPLOAD_CLEANUP"] = "true"
+        with self.assertRaisesRegex(ValueError, "approved retention rules"):
             self.check_app(model)
 
     def test_minio_bootstrap_and_runtime_must_agree(self):

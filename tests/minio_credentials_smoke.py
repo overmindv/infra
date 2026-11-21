@@ -147,6 +147,15 @@ def exercise(server, image, base, environment, measure):
     expect(base, 200, "POST", f"{multi}?{query}", media, body=complete)
     require(expect(base, 200, "GET", multi, media) == part, "multipart body differs")
     expect(base, 204, "DELETE", multi, media)
+    response = expect(base, 200, "POST", multi + "?uploads", media, body="")
+    upload_id = xml.fromstring(response).findtext("{*}UploadId")
+    require(upload_id, "second multipart upload did not return an ID")
+    query = urlencode({"uploadId": upload_id})
+    expect(base, 200, "GET", f"{multi}?{query}", media)
+    expect(base, 403, "DELETE", f"/media/originals/multipart-fixture?{query}", media)
+    expect(base, 403, "DELETE", f"{multi}?{query}", reader)
+    expect(base, 204, "DELETE", f"{multi}?{query}", media)
+    expect(base, 404, "GET", f"{multi}?{query}", media)
     print("Media copy and multipart passed; anonymous, cross-bucket and out-of-prefix requests denied")
 
     if measure:

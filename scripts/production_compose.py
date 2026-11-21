@@ -147,6 +147,8 @@ def check_renderer(services):
             raise ValueError(f"{name}: unexpected renderer socket mount")
     if services["media"]["environment"].get("MEDIA_ALLOW_UNSCANNED_LOCAL") != "false":
         raise ValueError("media: scan bypass is not allowed in production")
+    if services["media"]["environment"].get("MEDIA_ENABLE_UPLOAD_CLEANUP") != "false":
+        raise ValueError("media: upload cleanup requires approved retention rules")
     if services["media"].get("user") != "10001:10003":
         raise ValueError("media: expected the socket client UID and group")
 

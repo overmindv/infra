@@ -334,6 +334,11 @@ Media или Sandbox. Если существующий ID состоит в г�
 | `SANDBOX_TESTS_ACCESS_KEY_ID`, `SANDBOX_TESTS_SECRET_ACCESS_KEY` | `ovm-tests-<8 hex>` | Чтение в `sandbox-tests/sandbox-tests/prod/*` |
 | `SANDBOX_ARTIFACTS_ACCESS_KEY_ID`, `SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY` | `ovm-art-<8 hex>` | Только запись в `sandbox-artifacts/sandbox-artifacts/prod/runs/*` |
 
+Media может отменять multipart и читать список частей только в
+`media-quarantine/uploads/*`. Фоновая очистка в production отключена до
+согласования сроков хранения. Для тестового стенда ее можно включить через
+`MEDIA_ENABLE_UPLOAD_CLEANUP=true` в локальном Compose.
+
 Для readiness Media отдельно разрешен `ListBucket` на `media`: операция
 [`HeadBucket`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html)
 проверяет это право. Оно не дает читать содержимое остальных бакетов.
