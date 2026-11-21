@@ -111,6 +111,7 @@ kafka-check: init
 # Быстрая проверка инфраструктурных файлов
 lint: release-test sandbox-compose-test release-scan-test content-compose-test media-compose-test
 	@docker compose --env-file .env.example -f docker-compose.yml config >/dev/null
+	@$(PYTHON) -m unittest discover -s tests -p 'test_production_compose.py'
 	@sh -n scripts/*.sh tests/integration.sh
 	@sh -n tests/kafka.sh
 	@sh -n scripts/kafka/topics.sh
