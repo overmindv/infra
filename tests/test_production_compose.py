@@ -157,6 +157,15 @@ class ProductionComposeTest(unittest.TestCase):
         self.assertEqual(self.model["runner"]["services"].keys(), deploy.RUNNER_IMAGES.keys())
         self.assertTrue(self.model["runner"]["services"].keys().isdisjoint(self.model["app"]["services"]))
 
+    def test_learner_goals_use_the_internal_topic_catalog(self):
+        services = self.model["app"]["services"]
+        recommendations = services["recommendations"]
+        entities = services["entities"]
+        self.assertEqual(recommendations["environment"]["ENTITIES_URL"], "http://entities:8080")
+        self.assertTrue(recommendations["networks"].keys() & entities["networks"].keys())
+        self.assertFalse(recommendations.get("ports"))
+        self.assertFalse(entities.get("ports"))
+
     def test_image_tag_is_rejected(self):
         release = copy.deepcopy(self.release)
         release["images"]["gojudge"] = "fixture.invalid/gojudge:latest"

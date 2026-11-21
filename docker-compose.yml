@@ -560,6 +560,7 @@ services:
       DATABASE_URL: "postgres://recommendations:${RECOMMENDATIONS_POSTGRES_PASSWORD}@recommendations-postgres:5432/recommendations?sslmode=disable"
       RECOMMENDATIONS_SERVICE_TOKEN: ${RECOMMENDATIONS_SERVICE_TOKEN:?set RECOMMENDATIONS_SERVICE_TOKEN in .env}
       WRITE_TIMEOUT: 35s
+      ENTITIES_URL: http://entities:8080
       AI_ENABLED: ${AI_ENABLED:-false}
       AI_FREE_TIER_CONFIRMED: ${AI_FREE_TIER_CONFIRMED:-false}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
