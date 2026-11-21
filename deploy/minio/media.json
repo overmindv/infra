@@ -1,0 +1,25 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetBucketLocation"],
+      "Resource": ["arn:aws:s3:::media", "arn:aws:s3:::media-quarantine"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:ListBucket"],
+      "Resource": ["arn:aws:s3:::media"]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": [
+        "arn:aws:s3:::media-quarantine/uploads/*",
+        "arn:aws:s3:::media/originals/*",
+        "arn:aws:s3:::media/public/verified/variants/*/*.webp",
+        "arn:aws:s3:::media/variants/*"
+      ]
+    }
+  ]
+}

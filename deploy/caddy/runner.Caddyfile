@@ -1,0 +1,80 @@
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+		timeouts {
+			read_header 5s
+			idle 1m
+		}
+	}
+	log {
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+(runner_tls) {
+	bind {$RUNNER_BIND_IP}
+	tls /etc/overmindv/runner-tls/server.pem /etc/overmindv/runner-tls/server-key.pem {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/overmindv/runner-tls/worker-ca.pem
+		}
+	}
+}
+
+(runner_matchers) {
+	@foreign_peer not remote_ip {$RUNNER_APP_IP}/32
+	@version {
+		method GET
+		path /version
+	}
+	@run {
+		method POST
+		path /run
+	}
+	@file {
+		method GET DELETE
+		path_regexp "^/file/[A-Z2-7]{8}$"
+	}
+}
+
+https://{$RUNNER_TLS_HOST}:8443 {
+	import runner_tls
+	import runner_matchers
+	@upload {
+		method POST
+		path /file
+	}
+	route {
+		respond @foreign_peer 403
+		reverse_proxy @version 127.0.0.1:15050
+		reverse_proxy @run 127.0.0.1:15050
+		reverse_proxy @file 127.0.0.1:15050
+		handle @upload {
+			request_body {
+				max_size 9MiB
+			}
+			reverse_proxy 127.0.0.1:15050
+		}
+		respond 404
+	}
+}
+
+https://{$RUNNER_TLS_HOST}:8444 {
+	import runner_tls
+	import runner_matchers
+	route {
+		respond @foreign_peer 403
+		reverse_proxy @version 127.0.0.1:15051
+		reverse_proxy @run 127.0.0.1:15051
+		reverse_proxy @file 127.0.0.1:15051
+		respond 404
+	}
+}

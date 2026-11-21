@@ -101,12 +101,13 @@ Production overlay использует [теги слияния Compose](https:
 
 | Узел | Порт на хосте | Куда передает прокси |
 | --- | --- | --- |
-| Приложение | `127.0.0.1:13000` | Frontend и GraphQL |
+| Приложение | `127.0.0.1:13000` | Frontend |
+| Приложение | `127.0.0.1:18081` | Только `/graphql` |
 | Приложение | `127.0.0.1:19000` | S3 API для браузерных запросов, без консоли |
 | Runner | `127.0.0.1:15050` | Исполнение go-judge |
 | Runner | `127.0.0.1:15051` | Компиляция go-judge |
 
-На узле приложения внешние запросы принимает HTTPS-прокси. На runner прокси слушает
+На узле приложения внешние запросы принимает Caddy, см. раздел ниже. На runner прокси слушает
 только частный интерфейс и принимает запросы только от узла приложения. Sandbox worker
 использует отдельные HTTPS-адреса для исполнения и компиляции. До запуска нужно настроить аутентификацию между
 узлами, firewall и TLS по [OVM-163](https://overmindv.atlassian.net/browse/OVM-163).
@@ -130,13 +131,14 @@ Compose не настраивает firewall VM и не доказывает и�
 Скрипт сверяет SHA-256. SQL монтируется read-only только в контейнер миграции.
 Если набор миграций Sandbox изменится, скрипт потребует обновить этот порядок запуска.
 
-Env-файл приложения держим вне репозитория с правами `0600`. Для БД нужны отдельные
-случайные hex-пароли от 32 символов и рабочие ключи сервисов. `BOOTSTRAP_SUPERUSER_EMAIL`
+Env-файл приложения держим вне репозитория под `root` с правами `0600`.
+Родительские каталоги принадлежат root и не доступны другим на запись.
+Команда `up` проверяет права до чтения env. `BOOTSTRAP_SUPERUSER_EMAIL`
 и пароль задаются явно. `CORS_ORIGINS`, `MEDIA_S3_PUBLIC_ENDPOINT` и
-`MEDIA_PUBLIC_BASE_URL` указывают HTTPS-адреса веб-входа и S3. MinIO, Media, тесты и
-артефакты используют разные ключи. Для трех сервисных ключей заранее настраиваем
-права только на нужные бакеты. `SANDBOX_GOJUDGE_BASE_URL` и `SANDBOX_GOJUDGE_COMPILER_URL`
-указывают на разные закрытые HTTPS-адреса runner. `SANDBOX_WORKER_ID` задает постоянное имя worker.
+`MEDIA_PUBLIC_BASE_URL` указывают HTTPS-адреса веб-входа и S3. Права сервисов
+в MinIO задает отдельное задание. `SANDBOX_GOJUDGE_BASE_URL` и
+`SANDBOX_GOJUDGE_COMPILER_URL` указывают на закрытые HTTPS-адреса исполнения и
+компиляции. `SANDBOX_WORKER_ID` задает постоянное имя worker.
 
 Из корня `infra` сначала проверяем конфигурацию и манифест:
 
@@ -147,7 +149,8 @@ python3 scripts/production_compose.py runner check --manifest /etc/overmindv/rel
 # Application VM
 python3 scripts/production_compose.py app check \
   --manifest /etc/overmindv/release.json --env-file /etc/overmindv/app.env \
-  --sandbox-migration /etc/overmindv/001_init_runs.sql
+  --sandbox-migration /etc/overmindv/001_init_runs.sql \
+  --runner-tls-dir /etc/overmindv/worker-tls
 ```
 
 `check` не печатает конфигурацию и не запускает контейнеры. Для запуска на готовом
@@ -157,3 +160,234 @@ python3 scripts/production_compose.py app check \
 карантин, тесты и артефакты закрыты. Media требует ClamAV, а renderer получает
 свой образ `media-renderer` из манифеста и работает без сети и ключей S3.
 Состояние брокера и топиков сверяем с OVM-164 перед выпуском.
+
+## Публичный HTTPS
+
+Caddy 2.11.9 ставим на узел приложения как системный сервис. Указываем два DNS-имени,
+направленные на этот узел: веб и S3. Снаружи открываем TCP 443 и TCP 80 для
+получения сертификата и перенаправления на HTTPS. Порты Compose остаются на
+loopback. На runner этот Caddyfile не используем.
+
+В `/etc/overmindv/edge.env` нужны только две настройки, с такими же значениями как
+в `app.env`:
+
+```dotenv
+CORS_ORIGINS=https://learn.example.org
+MEDIA_S3_PUBLIC_ENDPOINT=https://files.example.org
+```
+
+Передаем этот файл через `EnvironmentFile=/etc/overmindv/edge.env` в секции
+`[Service]` systemd drop-in для Caddy. Копируем [правила Caddy](../deploy/caddy/public.Caddyfile)
+в `/etc/caddy/Caddyfile`. Проверяем перед перезапуском:
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+  --envfile /etc/overmindv/edge.env
+```
+
+Caddy получает и обновляет сертификаты через
+[автоматический HTTPS](https://caddyserver.com/docs/automatic-https). HTTP API
+администрирования Caddy выключен. Изменение Caddyfile применяем через перезапуск,
+а не через команду `caddy reload`. Ключи сертификатов остаются в каталоге данных
+сервиса Caddy, не в Compose и не в Git.
+
+Gateway работает в режиме `production` с Secure cookie и принимает
+`X-Forwarded-Proto` только от адреса bridge gateway приложения. По умолчанию это
+`172.29.163.1/32`. Если сеть пересекается с сетью провайдера или VPN, заранее
+выбираем непересекающиеся `PRODUCTION_APP_BRIDGE_SUBNET` и
+`PRODUCTION_APP_BRIDGE_GATEWAY`. Проверяем на целевой VM, что соединение от
+хостового Caddy приходит именно с этого адреса. Не расширяем доверие до всего
+подсета ради обхода проверки. Текущий Gateway считает квоту входа по IP
+транспортного peer, поэтому за прокси IP-квота общая для пользователей.
+
+Веб-вход убирает служебные actor-заголовки и формирует собственный
+`X-Forwarded-Proto`. До S3 доходят только browser POST/PUT в quarantine и
+GET/HEAD для оригиналов и вариантов, включая `public/verified/variants`. Для записи и preflight нужен
+origin веб-сайта. Host и query подписанных запросов сохраняются, cookie и
+браузерный bearer до S3 не доходят. Права и подпись проверяет сам MinIO.
+В логах Caddy не сохраняются заголовки и URI запросов.
+
+Локальная проверка использует временный CA и не требует DNS или публичного ACME:
+
+```bash
+python3 tests/public_edge_smoke.py
+```
+
+## Приватный TLS до runner
+
+На runner используем [отдельный Caddyfile](../deploy/caddy/runner.Caddyfile).
+Этот Caddy слушает частный IP на TCP 8443 для исполнения и 8444 для компиляции,
+без HTTP и публичного ACME. В firewall разрешаем оба порта только с частного IP
+узла приложения. Caddy проверяет IP соединения и клиентский сертификат.
+Оба адреса пропускают `GET /version`, `POST /run` и чтение или удаление по ID
+артефакта. `POST /file` разрешен только для исполнения. Запросы уходят на
+`127.0.0.1:15050` и `127.0.0.1:15051` соответственно.
+
+Передаем Caddy на runner отдельный `EnvironmentFile` через systemd:
+
+```dotenv
+RUNNER_TLS_HOST=runner.internal
+RUNNER_BIND_IP=10.70.0.20
+RUNNER_APP_IP=10.70.0.10
+```
+
+Имена и IP здесь пример. DNS `RUNNER_TLS_HOST` должен резолвиться в частный
+адрес runner. В `app.env` указываем:
+
+```dotenv
+SANDBOX_GOJUDGE_BASE_URL=https://runner.internal:8443
+SANDBOX_GOJUDGE_COMPILER_URL=https://runner.internal:8444
+```
+
+Используем выделенные CA для сервера runner и клиентов worker. Закрытые ключи
+CA не размещаем на этих VM. Сертификат runner должен иметь SAN с именем
+`RUNNER_TLS_HOST` и назначение `serverAuth`. Сертификат worker выпускаем с
+`clientAuth`.
+
+| Узел | Файлы | Доступ |
+| --- | --- | --- |
+| Runner | `/etc/overmindv/runner-tls/server.pem`, `server-key.pem`, `worker-ca.pem` | Каталог `root:caddy` с `0750`, файлы `root:caddy` с `0640`; go-judge их не получает |
+| Приложение | `/etc/overmindv/worker-tls/runner-ca.pem`, `worker.pem`, `worker-key.pem` | Каталог `root:10001` с `0750`, файлы `root:10001` с `0640`; read-only mount только в worker |
+
+Родительский каталог `/etc/overmindv` на узле приложения ограничиваем для
+обычных пользователей. В `release.json` нужен образ Sandbox с коммитом
+[`273583c`](https://github.com/overmindv/sandbox/commit/273583c7a27edbac47a6906e44b7164c0a4b6b1c)
+или последующей версией с поддержкой `SANDBOX_GOJUDGE_TLS_*_FILE`.
+Worker проверяет CA и имя сервера перед отправкой данных задачи. В
+runner-контейнере нет ключа worker, доступа к БД или S3.
+
+При ротации CA сначала добавляем новый CA в доверенный набор на принимающей
+стороне, затем обновляем сертификат и ключ на отправляющей. Перезапускаем Caddy
+после смены его ключа или доверенных CA, worker после обновления его файлов.
+Старый CA убираем после проверки `/version` и контрольного запуска. Полная
+проверка firewall и маршрута между VM остается частью приемки.
+
+Локальный тест требует Docker и OpenSSL, создает временные сертификаты:
+
+```bash
+python3 tests/runner_edge_smoke.py
+```
+
+## Роли баз данных
+
+У каждого сервиса отдельный экземпляр PostgreSQL с тремя ролями. В `app.env`
+заполняем три разных случайных hex-пароля для каждой БД. Например, для Users:
+
+| Переменная | Роль | Где используется |
+| --- | --- | --- |
+| `USERS_POSTGRES_ADMIN_PASSWORD` | `postgres` | Контейнер БД, первичная настройка и операции администратора |
+| `USERS_POSTGRES_MIGRATOR_PASSWORD` | `overmind_migrator` | Миграции и выдача прав на созданные таблицы |
+| `USERS_POSTGRES_PASSWORD` | `overmind_app` | Users и проверка на старые демо-аккаунты |
+
+Те же имена с префиксами `ENTITIES`, `TASKS`, `FEED`, `TASK_HUNTER`,
+`RECOMMENDATIONS`, `CONTENT`, `MEDIA` и `SANDBOX`. Каждый пароль генерируем
+независимо, например в менеджере паролей как 32 случайных байта в hex.
+Доступ к Docker daemon ограничиваем администраторами: ему доступны секреты,
+которые переданы контейнерам через environment.
+
+При первом запуске PostgreSQL создает роли на пустом томе. Миграции идут от
+`overmind_migrator`: он не суперпользователь, но может создавать объекты и
+устанавливать [доверенные расширения](https://www.postgresql.org/docs/17/sql-createextension.html)
+в своей БД. После миграций задание `*-grants` дает приложениям права на данные,
+без DDL, изменения истории Goose и удаления записей аудита Users.
+Если роли на существующем томе отсутствуют, новый запуск не откроет API с
+админским DSN. Подготовку такого тома делаем отдельно с бэкапом и проверкой
+восстановления; ничего автоматически не очищаем.
+
+### Смена пароля БД
+
+Меняем один пароль за раз в согласованное окно. Сначала останавливаем затронутый
+runtime или убеждаемся, что миграции не выполняются, в зависимости от роли.
+Входим в нужный контейнер через локальный Unix socket под системным postgres:
+
+```bash
+docker exec -it --user postgres overmindv-production-users-postgres-1 psql -X -U postgres -d users
+```
+
+В psql выполняем [`\password`](https://www.postgresql.org/docs/17/app-psql.html)
+для нужной роли, например `\password overmind_app`. Не указываем пароль в SQL,
+аргументах shell или заявке. Обновляем соответствующую строку в root-only
+`app.env` и запускаем `app up` по инструкции выше. Смена переменной
+`POSTGRES_PASSWORD` сама по себе не меняет пароль в существующей БД.
+Проверяем новое соединение и отказ входа со старым паролем. Старые соединения
+не закрываются сменой пароля; перезапуск приложения обновляет его пул.
+Если вход не восстановился, возвращаем предыдущий пароль через psql и его
+защищенную копию в env, без отката базы.
+
+На временном PostgreSQL проверяем права, миграции и смену пароля:
+
+```bash
+python3 tests/postgres_roles_smoke.py
+```
+
+## Доступ к MinIO
+
+Задание `media-buckets` создает бакеты, закрывает анонимный доступ и привязывает
+[политики](../deploy/minio/) к трем учетным записям. Анонимное чтение разрешено
+только для проверенных публичных WebP. Задание не выдает root-ключ
+Media или Sandbox. Если существующий ID состоит в группе, имеет лишние политики
+или отключен, задание завершится ошибкой и не включит его снова.
+
+| Переменные в `app.env` | Формат ID | Права |
+| --- | --- | --- |
+| `MEDIA_S3_ACCESS_KEY`, `MEDIA_S3_SECRET_KEY` | `ovm-media-<8 hex>` | Чтение, запись и удаление в `media-quarantine/uploads/*`, `media/originals/*`, `media/variants/*` и `media/public/verified/variants/*/*.webp` |
+| `SANDBOX_TESTS_ACCESS_KEY_ID`, `SANDBOX_TESTS_SECRET_ACCESS_KEY` | `ovm-tests-<8 hex>` | Чтение в `sandbox-tests/sandbox-tests/prod/*` |
+| `SANDBOX_ARTIFACTS_ACCESS_KEY_ID`, `SANDBOX_ARTIFACTS_SECRET_ACCESS_KEY` | `ovm-art-<8 hex>` | Только запись в `sandbox-artifacts/sandbox-artifacts/prod/runs/*` |
+
+Для readiness Media отдельно разрешен `ListBucket` на `media`: операция
+[`HeadBucket`](https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html)
+проверяет это право. Оно не дает читать содержимое остальных бакетов.
+Ключ чтения тестов не публикует новые suite. Публикацию и резервные копии
+выполняем под отдельными ролями вне worker.
+
+`MINIO_ROOT_USER` задаем отдельно, без префиксов рабочих ключей. Каждое значение
+пароля MinIO генерируем независимо, 20 случайных байт в hex (40 знаков).
+Не назначаем этим ID дополнительные группы или политики вручную.
+
+### Ротация ключей MinIO
+
+1. Генерируем новый ID с тем же префиксом и новый пароль, обновляем пару в
+   защищенном `app.env`. Менять только пароль действующего ключа не нужно.
+2. Выполняем `app up`. Сначала `media-buckets` создает новый ID, затем
+   затронутый сервис запускается с ним. Проверяем запросы с новым ключом,
+   в том числе загрузку и чтение для Media. Старый ID остается активен.
+3. Для Media ждем истечения уже выданных подписанных ссылок и проверяем,
+   что нет ожидающих загрузок со старым ключом. Отключаем старого пользователя
+   через [`mc admin user disable`](https://docs.min.io/aistor/reference/cli/admin/mc-admin-user/mc-admin-user-disable/).
+   Проверяем отказ старого ключа. Бакеты и объекты не удаляем.
+
+Для отката до отключения достаточно вернуть прежнюю пару в `app.env`.
+После отключения старый ID надо явно включить перед откатом. Операции
+администратора выполняем локально на узле приложения, не открывая доступ
+к MinIO Console. Смену root-пароля делаем отдельно в окно обслуживания с
+перезапуском MinIO; рабочие ключи при этом не меняем.
+
+Локальная проверка использует временный MinIO и `curl` с SigV4:
+
+```bash
+python3 tests/minio_credentials_smoke.py --benchmark
+```
+
+## Ротация токенов сервисов
+
+Для каждого токена генерируем 32 случайных байта в hex. Токен одинаковый
+на двух концах одного вызова, но не совпадает с токенами других связей или
+паролями БД и MinIO. `app check` проверяет это без вывода значений.
+
+| Переменная | Кто использует |
+| --- | --- |
+| `JWT_SECRET` | Users и Gateway |
+| `TASK_HUNTER_INGEST_TOKEN` | Task Hunter и Tasks |
+| `TASK_HUNTER_GATEWAY_TOKEN` | Gateway и Task Hunter |
+| `FEED_GATEWAY_TOKEN` | Gateway и Feed |
+| `MEDIA_GATEWAY_TOKEN` | Gateway и Media |
+| `MEDIA_USERS_TOKEN` | Users и Media |
+| `RECOMMENDATIONS_SERVICE_TOKEN` | Gateway и Recommendations |
+
+Сервисы принимают один действующий токен на связь. На время смены приостанавливаем
+затронутый вызов, обновляем одну строку в `app.env` и пересоздаем оба контейнера
+через `app up`. Проверяем успешный вызов и отказ со старым токеном, затем
+возобновляем обработку. При ошибке возвращаем предыдущую версию секрета и
+перезапускаем оба конца. После смены `JWT_SECRET` пользователям потребуется
+войти заново. Токены не передаем в аргументах команд и не выводим конфигурацию
+через `docker compose config` на экран.
