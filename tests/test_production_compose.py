@@ -11,6 +11,7 @@ import production_compose as deploy
 
 
 MODERATION_TOKEN = "CONTENT_GRPC_MODERATION_TOKEN"
+SNAPSHOT_TOKEN = "ENTITIES_SNAPSHOT_TOKEN"
 
 
 def fixture_release(sql):
@@ -141,6 +142,10 @@ class ProductionComposeTest(unittest.TestCase):
             cls.model[target] = deploy.check_compose(deploy.compose_args(target, fixture), env)
         env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, cls.content_tls)
         cls.tls_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
+        cls.snapshot_token = f"{703:064x}"
+        env[SNAPSHOT_TOKEN] = cls.snapshot_token
+        cls.snapshot_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
+        env.pop(SNAPSHOT_TOKEN)
         env.update({MODERATION_TOKEN: f"{902:064x}", "CONTENT_ACTIVITY_ENABLED": "true"})
         cls.moderation_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
         cls.moderation_without_tls = deploy.check_compose(deploy.compose_args("app", fixture), env)
@@ -165,6 +170,17 @@ class ProductionComposeTest(unittest.TestCase):
         self.assertTrue(recommendations["networks"].keys() & entities["networks"].keys())
         self.assertFalse(recommendations.get("ports"))
         self.assertFalse(entities.get("ports"))
+
+    def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
+        current = self.model["app"]["services"]
+        self.assertFalse(current["recommendations"]["environment"].get(SNAPSHOT_TOKEN))
+        self.assertFalse(current["entities"]["environment"].get(SNAPSHOT_TOKEN))
+        recipients = {
+            name: svc["environment"][SNAPSHOT_TOKEN]
+            for name, svc in self.snapshot_model["services"].items()
+            if SNAPSHOT_TOKEN in svc.get("environment", {})
+        }
+        self.assertEqual(recipients, {"entities": self.snapshot_token, "recommendations": self.snapshot_token})
 
     def test_image_tag_is_rejected(self):
         release = copy.deepcopy(self.release)
