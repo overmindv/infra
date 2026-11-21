@@ -432,6 +432,8 @@ services:
     image: ${RELEASE_RECOMMENDATIONS_IMAGE:?release manifest required}
     environment:
       DATABASE_URL: postgres://overmind_app:${RECOMMENDATIONS_POSTGRES_PASSWORD:?production database password required}@recommendations-postgres:5432/recommendations?sslmode=disable
+      RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED: "false"
+      CONTENT_GRPC_CATALOG_TOKEN: !reset null
     depends_on:
       recommendations-grants:
         condition: service_completed_successfully
@@ -451,6 +453,7 @@ services:
     environment:
       DATABASE_URL: postgres://overmind_app:${CONTENT_POSTGRES_PASSWORD:?production database password required}@content-postgres:5432/content?sslmode=disable
       ENV: production
+      CONTENT_GRPC_CATALOG_TOKEN: !reset null
       CONTENT_MEDIA_URL: !reset null
       CONTENT_MEDIA_TOKEN: !reset null
       CONTENT_GRPC_MODERATION_TOKEN: !reset null
