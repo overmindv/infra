@@ -187,6 +187,11 @@ overlay. Без ключа методы скрытия и восстановле
 обновите Feed до версии, которая обрабатывает `material.withdrawn`
 и `material.restored`.
 
+`CONTENT_CONTRIBUTION_ENABLED=true` включает отдельный поток событий
+редактуры после принятия правки. Нужен включенный `CONTENT_ACTIVITY_ENABLED`
+и топик `KAFKA_CONTENT_CONTRIBUTION_TOPIC`, совпадающий с планом Kafka.
+Content пишет в него; Feed и Recommendations не получают доступ на чтение.
+
 ## Публичный HTTPS
 
 Caddy 2.11.9 ставим на узел приложения как системный сервис. Указываем два DNS-имени,
