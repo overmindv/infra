@@ -759,7 +759,15 @@ services:
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc mb --ignore-existing local/media-quarantine
         mc mb --ignore-existing local/media
-        mc anonymous set download local/media
+        mc anonymous set none local/media-quarantine
+        mc anonymous set-json /etc/media/public-policy.json local/media
+    volumes:
+      - type: bind
+        source: ./config/media/public-policy.json
+        target: /etc/media/public-policy.json
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
@@ -768,13 +776,19 @@ services:
         condition: service_healthy
     restart: "no"
 
-  # ClamAV — антивирус, опциональный. На ряде сетей не может скачать базу сигнатур,
-  # поэтому не входит в дефолтный стек и не обязателен для media (проверка деградирует).
-  # Включить: docker compose --profile antivirus up -d clamav
+  # Пока ClamAV недоступен, загруженные файлы остаются в карантине.
+  # Локальный запуск: docker compose --profile antivirus up -d clamav
   clamav:
     image: ${CLAMAV_IMAGE:-clamav/clamav:1.4_base}
     platform: ${MEDIA_TOOL_PLATFORM:-linux/amd64}
     profiles: ["antivirus"]
+    environment:
+      CLAMD_CONF_StreamMaxLength: 251M
+      CLAMD_CONF_MaxFileSize: 250M
+      CLAMD_CONF_MaxScanSize: 500M
+      CLAMD_CONF_AlertExceedsMax: "yes"
+      CLAMD_CONF_AlertEncrypted: "yes"
+      CLAMD_CONF_MaxThreads: "2"
     volumes:
       - clamav-data:/var/lib/clamav
     healthcheck:
@@ -821,6 +835,7 @@ services:
       MEDIA_S3_PATH_STYLE: "true"
       MEDIA_PUBLIC_BASE_URL: http://localhost:${MINIO_API_PORT:-9000}/media
       MEDIA_CLAMAV_ADDR: clamav:3310
+      MEDIA_ALLOW_UNSCANNED_LOCAL: ${MEDIA_ALLOW_UNSCANNED_LOCAL:-false}
       MEDIA_USER_QUOTA_BYTES: ${MEDIA_USER_QUOTA_BYTES:-5368709120}
       MEDIA_MAX_AVATAR_BYTES: ${MEDIA_MAX_AVATAR_BYTES:-20971520}
       MEDIA_MAX_AVATAR_PIXELS: ${MEDIA_MAX_AVATAR_PIXELS:-40000000}
