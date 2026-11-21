@@ -377,9 +377,15 @@ def check_content_connection(services, enabled, used_secrets):
     binding_keys = {"CONTENT_MEDIA_URL", "CONTENT_MEDIA_TOKEN", "MEDIA_CONTENT_TOKEN"}
     if any(service.get("environment", {}).get(key) for service in services.values() for key in binding_keys):
         raise ValueError("content: local Media binding credentials cannot reach production")
+    moderation_key = "CONTENT_GRPC_MODERATION_TOKEN"
+    if any(service.get("environment", {}).get(moderation_key)
+           for name, service in services.items() if name not in {"api-gateway", "content"}):
+        raise ValueError("content: only Content and Gateway may receive the moderation token")
+    gateway_moderation = gateway.get(moderation_key)
+    content_moderation = content.get(moderation_key)
     gateway_keys = ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_TLS_CA_FILE", "CONTENT_GRPC_INSECURE")
     if not enabled:
-        if any(gateway.get(key) for key in gateway_keys):
+        if gateway_moderation or content_moderation or any(gateway.get(key) for key in gateway_keys):
             raise ValueError("gateway: Content connection requires its TLS overlay")
         return
     if any(gateway.get(key) != value for key, value in {
@@ -396,6 +402,13 @@ def check_content_connection(services, enabled, used_secrets):
     if (not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token)
             or token != content.get("CONTENT_GRPC_SERVICE_TOKEN") or token in used_secrets):
         raise ValueError("content: both services need the same unique 64-digit random hex token")
+    if not (gateway_moderation or content_moderation):
+        return
+    if (not isinstance(gateway_moderation, str) or not re.fullmatch(r"[a-f0-9]{64}", gateway_moderation)
+            or gateway_moderation != content_moderation or gateway_moderation == token or gateway_moderation in used_secrets):
+        raise ValueError("content: both services need the same unique 64-digit moderation token")
+    if content.get("CONTENT_ACTIVITY_ENABLED") != "true" or content.get("KAFKA_ENABLED") != "true":
+        raise ValueError("content: moderation requires Kafka material activity")
 
 
 def check_material_activity(services):
