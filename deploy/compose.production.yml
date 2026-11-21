@@ -453,6 +453,7 @@ services:
       ENV: production
       CONTENT_MEDIA_URL: !reset null
       CONTENT_MEDIA_TOKEN: !reset null
+      CONTENT_GRPC_MODERATION_TOKEN: !reset null
     depends_on:
       content-grants:
         condition: service_completed_successfully
@@ -552,6 +553,7 @@ services:
       APP_ENV: production
       CONTENT_GRPC_ADDR: !reset null
       CONTENT_GRPC_SERVICE_TOKEN: !reset null
+      CONTENT_GRPC_MODERATION_TOKEN: !reset null
       CONTENT_GRPC_INSECURE: !reset null
       CONTENT_GRPC_TIMEOUT: !reset null
       SESSION_COOKIE_SECURE: "true"

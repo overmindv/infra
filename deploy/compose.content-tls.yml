@@ -4,6 +4,7 @@ services:
     environment:
       CONTENT_GRPC_TLS_CERT_FILE: /run/content/tls/server.pem
       CONTENT_GRPC_TLS_KEY_FILE: /run/content/tls/server-key.pem
+      CONTENT_GRPC_MODERATION_TOKEN: ${CONTENT_GRPC_MODERATION_TOKEN:-}
     volumes:
       - type: bind
         source: ${RELEASE_CONTENT_TLS_DIR:?Content TLS directory required}/server.pem
@@ -21,6 +22,7 @@ services:
     environment:
       CONTENT_GRPC_ADDR: content:9090
       CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:?Content service token required}
+      CONTENT_GRPC_MODERATION_TOKEN: ${CONTENT_GRPC_MODERATION_TOKEN:-}
       CONTENT_GRPC_TLS_CA_FILE: /run/content/tls/server-ca.pem
       CONTENT_GRPC_INSECURE: "false"
       CONTENT_GRPC_TIMEOUT: ${CONTENT_GRPC_TIMEOUT:-3s}

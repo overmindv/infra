@@ -10,6 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import production_compose as deploy
 
 
+MODERATION_TOKEN = "CONTENT_GRPC_MODERATION_TOKEN"
+
+
 def fixture_release(sql):
     ref = "fixture.invalid/{name}@sha256:" + "a" * 64
     return {
@@ -112,6 +115,9 @@ class ProductionComposeTest(unittest.TestCase):
             cls.model[target] = deploy.check_compose(deploy.compose_args(target, fixture), env)
         env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, cls.content_tls)
         cls.tls_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
+        env.update({MODERATION_TOKEN: f"{902:064x}", "CONTENT_ACTIVITY_ENABLED": "true"})
+        cls.moderation_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
+        cls.moderation_without_tls = deploy.check_compose(deploy.compose_args("app", fixture), env)
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -234,6 +240,37 @@ class ProductionComposeTest(unittest.TestCase):
                 if key == "CONTENT_GRPC_SERVICE_TOKEN":
                     services["content"]["environment"][key] = value
                 with self.assertRaisesRegex(ValueError, "Content TLS connection|unique 64-digit"):
+                    deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls, self.content_tls)
+
+    def test_moderation_requires_tls_and_material_activity(self):
+        self.check_app(self.moderation_without_tls)
+        for name in ("content", "api-gateway"):
+            self.assertFalse(self.moderation_without_tls["services"][name]["environment"].get(MODERATION_TOKEN))
+        services = self.moderation_model["services"]
+        self.assertTrue(bool(services["api-gateway"]["environment"].get(MODERATION_TOKEN)), "missing moderation token")
+        self.assertTrue(bool(services["content"]["environment"].get(MODERATION_TOKEN)), "missing moderation token")
+        deploy.check_model(self.moderation_model, "app", self.images["app"], self.migration, self.runner_tls, self.content_tls)
+
+        for kind, reason in (
+            ("reused", "unique 64-digit moderation token"),
+            ("mismatched", "unique 64-digit moderation token"),
+            ("leaked", "only Content and Gateway"),
+            ("no-events", "requires Kafka material activity"),
+        ):
+            with self.subTest(kind=kind):
+                model = copy.deepcopy(self.moderation_model)
+                peers = model["services"]
+                gateway = peers["api-gateway"]["environment"]
+                content = peers["content"]["environment"]
+                if kind == "reused":
+                    content[MODERATION_TOKEN] = gateway[MODERATION_TOKEN] = gateway["CONTENT_GRPC_SERVICE_TOKEN"]
+                elif kind == "mismatched":
+                    content[MODERATION_TOKEN] = ""
+                elif kind == "leaked":
+                    peers["sandbox"]["environment"][MODERATION_TOKEN] = gateway[MODERATION_TOKEN]
+                else:
+                    content["CONTENT_ACTIVITY_ENABLED"] = "false"
+                with self.assertRaisesRegex(ValueError, reason):
                     deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls, self.content_tls)
 
     def test_object_origin_cannot_share_the_web_hostname(self):

@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "CONTENT_GRPC_SERVICE_TOKEN"
+MODERATION_TOKEN = "CONTENT_GRPC_MODERATION_TOKEN"
 CATALOG_URL = "CONTENT_ENTITIES_URL"
 
 
@@ -40,15 +41,19 @@ class ContentComposeTest(unittest.TestCase):
 
             token = prepare()
             self.assertTrue(token == prepare(), "reinitialization changed the token")
-            env = {key: value for key, value in os.environ.items() if key not in {TOKEN, CATALOG_URL}}
-            rendered = subprocess.run(
-                [
-                    "docker", "compose", "--env-file", str(env_file), "--project-name", "content-compose-test",
-                    "-f", str(ROOT / "docker-compose.yml"), "--profile", "sandbox", "config", "--format", "json",
-                ],
-                cwd=root, env=env, check=True, capture_output=True, text=True, timeout=20,
-            )
-            services = json.loads(rendered.stdout)["services"]
+            env = {key: value for key, value in os.environ.items() if key not in {TOKEN, CATALOG_URL, MODERATION_TOKEN}}
+
+            def render():
+                rendered = subprocess.run(
+                    [
+                        "docker", "compose", "--env-file", str(env_file), "--project-name", "content-compose-test",
+                        "-f", str(ROOT / "docker-compose.yml"), "--profile", "sandbox", "config", "--format", "json",
+                    ],
+                    cwd=root, env=env, check=True, capture_output=True, text=True, timeout=20,
+                )
+                return json.loads(rendered.stdout)["services"]
+
+            services = render()
             self.assertTrue(services["content"]["environment"].get(TOKEN) == token, "Content did not get its token")
             gateway = services["api-gateway"]["environment"]
             self.assertTrue(gateway.get(TOKEN) == token, "Gateway did not get the Content token")
@@ -59,6 +64,17 @@ class ContentComposeTest(unittest.TestCase):
             self.assertEqual(len(grpc_ports), 1)
             self.assertEqual(grpc_ports[0]["host_ip"], "127.0.0.1")
             self.assertNotIn(TOKEN, services["sandbox"]["environment"])
+            self.assertFalse(gateway.get(MODERATION_TOKEN))
+            self.assertFalse(services["content"]["environment"].get(MODERATION_TOKEN))
+            env[MODERATION_TOKEN] = f"{901:064x}"
+            services = render()
+            for name, service in services.items():
+                with self.subTest(service=name):
+                    value = service.get("environment", {}).get(MODERATION_TOKEN)
+                    if name in {"content", "api-gateway"}:
+                        self.assertTrue(value == env[MODERATION_TOKEN], "moderation token did not reach the peer")
+                    else:
+                        self.assertFalse(value, "moderation token reached an unrelated service")
 
 
 if __name__ == "__main__":
