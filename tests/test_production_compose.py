@@ -165,6 +165,12 @@ class ProductionComposeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exact host proxy address"):
             self.check_app(model)
 
+    def test_gateway_does_not_inherit_local_content_credentials(self):
+        gateway = self.model["app"]["services"]["api-gateway"]["environment"]
+        for key in ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_INSECURE", "CONTENT_GRPC_TIMEOUT"):
+            with self.subTest(key=key):
+                self.assertFalse(gateway.get(key))
+
     def test_object_origin_cannot_share_the_web_hostname(self):
         model = copy.deepcopy(self.model["app"])
         model["services"]["media"]["environment"]["MEDIA_S3_PUBLIC_ENDPOINT"] = "https://app.fixture.example.org"

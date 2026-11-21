@@ -50,6 +50,10 @@ class ContentComposeTest(unittest.TestCase):
             )
             services = json.loads(rendered.stdout)["services"]
             self.assertTrue(services["content"]["environment"].get(TOKEN) == token, "Content did not get its token")
+            gateway = services["api-gateway"]["environment"]
+            self.assertTrue(gateway.get(TOKEN) == token, "Gateway did not get the Content token")
+            self.assertEqual(gateway.get("CONTENT_GRPC_ADDR"), "content:9090")
+            self.assertEqual(gateway.get("CONTENT_GRPC_INSECURE"), "true")
             self.assertEqual(services["content"]["environment"].get(CATALOG_URL), "http://entities:8080")
             grpc_ports = [port for port in services["content"]["ports"] if port["target"] == 9090]
             self.assertEqual(len(grpc_ports), 1)
