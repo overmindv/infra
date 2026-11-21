@@ -28,6 +28,7 @@ services:
         user_tasks-v2="${FIXTURE_KAFKA_PASSWORD}"
         user_sandbox-v2="${FIXTURE_KAFKA_PASSWORD}"
         user_feed="${FIXTURE_KAFKA_PASSWORD}"
+        user_content="${FIXTURE_KAFKA_PASSWORD}"
         user_users="${FIXTURE_KAFKA_PASSWORD}";
       KAFKA_SUPER_USERS: User:broker;User:fixture_admin
       KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer

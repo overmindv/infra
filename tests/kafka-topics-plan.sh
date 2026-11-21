@@ -10,6 +10,7 @@ for topic in code-execution.requests.v1 code-execution.results.v1 code-execution
     printf '%s\n' "$plan" | awk -v topic="$topic" '$1 == topic { count++ } END { exit count != 1 }'
 done
 printf '%s\n' "$plan" | grep -Fxq 'user.deleted.v1 262144 - - -'
+printf '%s\n' "$plan" | grep -Fxq 'content.material.v1 262144 content feed feed-v1'
 if printf '%s\n' "$plan" | grep -q 'code-execution\..*\.v2'; then
     exit 1
 fi
@@ -29,6 +30,7 @@ reject KAFKA_REQUESTS_TOPIC=--alter
 reject 'KAFKA_REQUESTS_TOPIC= leading-space'
 reject KAFKA_REQUESTS_TOPIC=__consumer_offsets
 reject KAFKA_RESULTS_CONSUMER_GROUP=sandbox-code-execution-v1
+reject FEED_CONSUMER_GROUP=sandbox-code-execution-v1
 reject KAFKA_REQUESTS_TOPIC=code-execution.requests.v2
 reject SANDBOX_KAFKA_GROUP_ID=sandbox-code-execution-v2
 reject KAFKA_RESERVE_EXECUTION_V2=yes

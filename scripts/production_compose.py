@@ -398,6 +398,28 @@ def check_content_connection(services, enabled, used_secrets):
         raise ValueError("content: both services need the same unique 64-digit random hex token")
 
 
+def check_material_activity(services):
+    content = services["content"]["environment"]
+    feed = services["feed"]["environment"]
+    publisher = content.get("CONTENT_ACTIVITY_ENABLED", "false")
+    cards = feed.get("FEED_MATERIAL_CARDS_ENABLED", "false")
+    if publisher not in ("true", "false") or cards not in ("true", "false"):
+        raise ValueError("material activity flags must be true or false")
+    material_topic = content.get("KAFKA_CONTENT_MATERIAL_TOPIC")
+    feed_topic = feed.get("KAFKA_CONTENT_MATERIAL_TOPIC")
+    private_topics = (
+        content.get("KAFKA_TOPIC"), content.get("KAFKA_CONTENT_LEARNING_TOPIC"),
+        content.get("KAFKA_CONTENT_CONTRIBUTION_TOPIC"),
+    )
+    if feed_topic and (feed_topic != material_topic or feed_topic in private_topics):
+        raise ValueError("Feed can subscribe only to the public Content material topic")
+    publishing = publisher == "true" and content.get("KAFKA_ENABLED") == "true"
+    if publisher == "true" and not publishing:
+        raise ValueError("Content activity requires Kafka publishing")
+    if cards == "true" and (not feed_topic or not publishing):
+        raise ValueError("material cards require a matching subscription and Content publishing")
+
+
 def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None):
     project = PROJECTS[target]
     services = model["services"]
@@ -505,6 +527,7 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
     check_minio_credentials(services, used_secrets)
     check_service_tokens(services, used_secrets)
     check_content_connection(services, content_tls is not None, used_secrets)
+    check_material_activity(services)
 
 
 def compose_args(target, env_file, content_tls=None):

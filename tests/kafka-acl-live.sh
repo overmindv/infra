@@ -30,7 +30,7 @@ properties() {
         printf 'sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="%s" password="%s";\n' "$principal" "$FIXTURE_KAFKA_PASSWORD"
     } | compose exec -T broker sh -c 'umask 077; cat > "/tmp/$1.properties"' sh "$principal"
 }
-for principal in fixture_admin tasks sandbox tasks-v2 sandbox-v2 feed users; do
+for principal in fixture_admin tasks sandbox tasks-v2 sandbox-v2 feed content users; do
     properties "$principal"
 done
 
@@ -118,6 +118,14 @@ printf '%s\n' "${key}|reserved" | expect_denied TopicAuthorizationException prod
     --command-property enable.idempotence=false
 expect_denied GroupAuthorizationException consume sandbox code-execution.requests.v1 tasks-code-results-v1
 expect_denied TopicAuthorizationException consume sandbox code-execution.results.v1 sandbox-code-execution-v1
+
+material="${key}|published-material-fixture"
+printf '%s\n' "$material" | produce content content.material.v1
+expect_record "$material" feed content.material.v1 feed-v1
+printf '%s\n' "$material" | expect_denied TopicAuthorizationException produce feed content.material.v1 \
+    --command-property enable.idempotence=false
+expect_denied TopicAuthorizationException consume feed content.learning.v1 feed-v1
+expect_denied TopicAuthorizationException consume feed content.contribution.v1 feed-v1
 {
     printf '%s|' "$key"
     head -c 300000 /dev/zero | tr '\000' 'a'

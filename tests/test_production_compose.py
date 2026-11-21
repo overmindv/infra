@@ -28,6 +28,31 @@ def fixture_release(sql):
     }
 
 
+class MaterialActivityComposeTest(unittest.TestCase):
+    def test_cards_require_the_publisher_and_the_public_subscription(self):
+        content = {
+            "CONTENT_ACTIVITY_ENABLED": "true",
+            "KAFKA_ENABLED": "true",
+            "KAFKA_CONTENT_MATERIAL_TOPIC": "content.material.v1",
+            "KAFKA_CONTENT_LEARNING_TOPIC": "content.learning.v1",
+            "KAFKA_CONTENT_CONTRIBUTION_TOPIC": "content.contribution.v1",
+            "KAFKA_TOPIC": "content.content-item-events",
+        }
+        feed = {"KAFKA_CONTENT_MATERIAL_TOPIC": "content.material.v1", "FEED_MATERIAL_CARDS_ENABLED": "true"}
+        services = {"content": {"environment": content}, "feed": {"environment": feed}}
+        deploy.check_material_activity(services)
+        content["CONTENT_ACTIVITY_ENABLED"] = "false"
+        with self.assertRaisesRegex(ValueError, "cards require"):
+            deploy.check_material_activity(services)
+        feed["FEED_MATERIAL_CARDS_ENABLED"] = "false"
+        deploy.check_material_activity(services)
+        for private in ["content.learning.v1", "content.contribution.v1", "content.content-item-events"]:
+            with self.subTest(topic=private), self.assertRaisesRegex(ValueError, "public Content material"):
+                feed["KAFKA_CONTENT_MATERIAL_TOPIC"] = private
+                content["KAFKA_CONTENT_MATERIAL_TOPIC"] = private
+                deploy.check_material_activity(services)
+
+
 class ProductionComposeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

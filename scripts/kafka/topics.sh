@@ -29,6 +29,7 @@ v2=${KAFKA_RESERVE_EXECUTION_V2:-false}
 tasks_group=${KAFKA_RESULTS_CONSUMER_GROUP:-tasks-code-results-v1}
 sandbox_group=${SANDBOX_KAFKA_GROUP_ID:-sandbox-code-execution-v1}
 feed_group=${FEED_CONSUMER_GROUP:-feed-v1}
+material_topic=${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
 
 number() {
     case "$2" in
@@ -70,7 +71,7 @@ catalog() {
     row "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" "$legacy_max" entities feed "$feed_group"
     row "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}" "$legacy_max" tasks feed "$feed_group"
     row learning.outcome.v1 "$metadata_max" tasks recommendations recommendations-learning-evidence-v1
-    row "${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}" "$metadata_max" content recommendations -
+    row "$material_topic" "$metadata_max" content feed "$feed_group"
     row "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" "$metadata_max" content recommendations recommendations-learning-evidence-v1
     row "${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}" "$metadata_max" content - -
     row user.deleted.v1 "$metadata_max" - - -
@@ -181,10 +182,11 @@ acl() {
 
 # Combine grants that have the same principal and operation.
 grants() {
-    printf '%s\n' "$rows" | awk '
+    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
+        $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
     ' | sort -u | awk '
         { key = $1 " " $2; resources[key] = resources[key] " " $3 " " $4 }
         END { for (key in resources) print key resources[key] }

@@ -16,7 +16,7 @@ sh scripts/kafka/topics.sh plan
 | `catalog.activity.v1`, `task.activity.v1` | Entities, Tasks | Feed |
 | `content.content-item-events` | Content | Нет подключенного потребителя |
 | `learning.outcome.v1`, `content.learning.v1` | Tasks, Content | Recommendations, группа `recommendations-learning-evidence-v1` |
-| `content.material.v1` | Content | Recommendations, позиция хранится в его БД |
+| `content.material.v1` | Content | Feed (`feed-v1`), право чтения также зарезервировано для Recommendations |
 | `content.contribution.v1` | Content | Пока нет потребителя |
 | `user.deleted.v1` | Зарезервирован | ACL нет до согласования контракта Users |
 
@@ -52,6 +52,19 @@ Writer получает `Write` на свой топик, reader получае�
 проверьте разрешения на топики и группы, включая wildcard и prefix grants.
 На локальном брокере аутентификация и ACL не включаются автоматически.
 Для выката еще нужны клиентские credentials по OVM-163.
+
+## Публикации в ленте
+
+1. Примените миграции Content и Feed. Сверьте ACL на `content.material.v1`.
+2. Укажите `FEED_MATERIAL_ACTIVITY_TOPIC` с тем же именем, что в
+   `KAFKA_CONTENT_MATERIAL_TOPIC`. Включите `CONTENT_ACTIVITY_ENABLED=true`.
+3. С выключенными карточками проверьте потребление событий публикации и
+   архивации, позиции группы и отсутствие необработанных ошибок. Только затем
+   задайте `FEED_MATERIAL_CARDS_ENABLED=true`.
+
+Не выключайте публикацию событий, пока карточки видны читателям. В Feed не
+подключаются потоки учебных подтверждений и редакторского вклада.
+Изменение не переносит старые публикации в ленту само по себе.
 
 ## Переход на v2
 
