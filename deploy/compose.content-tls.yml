@@ -1,0 +1,33 @@
+services:
+  content:
+    group_add: ["10004"]
+    environment:
+      CONTENT_GRPC_TLS_CERT_FILE: /run/content/tls/server.pem
+      CONTENT_GRPC_TLS_KEY_FILE: /run/content/tls/server-key.pem
+    volumes:
+      - type: bind
+        source: ${RELEASE_CONTENT_TLS_DIR:?Content TLS directory required}/server.pem
+        target: /run/content/tls/server.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RELEASE_CONTENT_TLS_DIR:?Content TLS directory required}/server-key.pem
+        target: /run/content/tls/server-key.pem
+        read_only: true
+        bind:
+          create_host_path: false
+  api-gateway:
+    environment:
+      CONTENT_GRPC_ADDR: content:9090
+      CONTENT_GRPC_SERVICE_TOKEN: ${CONTENT_GRPC_SERVICE_TOKEN:?Content service token required}
+      CONTENT_GRPC_TLS_CA_FILE: /run/content/tls/server-ca.pem
+      CONTENT_GRPC_INSECURE: "false"
+      CONTENT_GRPC_TIMEOUT: ${CONTENT_GRPC_TIMEOUT:-3s}
+    volumes:
+      - type: bind
+        source: ${RELEASE_CONTENT_TLS_DIR:?Content TLS directory required}/server-ca.pem
+        target: /run/content/tls/server-ca.pem
+        read_only: true
+        bind:
+          create_host_path: false

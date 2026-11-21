@@ -38,6 +38,10 @@ class ProductionComposeTest(unittest.TestCase):
         cls.runner_tls.mkdir()
         for name in deploy.RUNNER_TLS_FILES.values():
             (cls.runner_tls / name).write_bytes(b"unused-fixture\n")
+        cls.content_tls = root / "content-tls"
+        cls.content_tls.mkdir()
+        for name in deploy.CONTENT_TLS_FILES:
+            (cls.content_tls / name).write_bytes(b"unused-fixture\n")
         cls.migration = root / "001_init_runs.sql"
         sql = b"SELECT 1;\n"
         cls.migration.write_bytes(sql)
@@ -60,6 +64,7 @@ class ProductionComposeTest(unittest.TestCase):
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
             f"MEDIA_S3_SECRET_KEY={102:040x}",
+            f"CONTENT_GRPC_SERVICE_TOKEN={700:064x}",
             "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.example.org",
             "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.example.org/media",
             "CORS_ORIGINS=https://app.fixture.example.org",
@@ -79,6 +84,8 @@ class ProductionComposeTest(unittest.TestCase):
                 deploy.compose_env(cls.images[target])
             )
             cls.model[target] = deploy.check_compose(deploy.compose_args(target, fixture), env)
+        env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, cls.content_tls)
+        cls.tls_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -170,6 +177,28 @@ class ProductionComposeTest(unittest.TestCase):
         for key in ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_INSECURE", "CONTENT_GRPC_TIMEOUT"):
             with self.subTest(key=key):
                 self.assertFalse(gateway.get(key))
+
+    def test_content_tls_overlay_keeps_private_key_out_of_gateway(self):
+        deploy.check_content_tls_files(self.content_tls)
+        deploy.check_model(self.tls_model, "app", self.images["app"], self.migration, self.runner_tls, self.content_tls)
+        services = self.tls_model["services"]
+        gateway = services["api-gateway"]
+        self.assertEqual(gateway["environment"]["CONTENT_GRPC_INSECURE"], "false")
+        self.assertEqual([Path(volume["source"]).name for volume in gateway["volumes"] if volume["type"] == "bind"],
+                         ["server-ca.pem"])
+        self.assertIn("10004", services["content"]["group_add"])
+
+    def test_content_tls_overlay_rejects_plaintext_and_reused_token(self):
+        for key, value in (("CONTENT_GRPC_INSECURE", "true"),
+                           ("CONTENT_GRPC_SERVICE_TOKEN", self.tls_model["services"]["api-gateway"]["environment"]["JWT_SECRET"])):
+            with self.subTest(key=key):
+                model = copy.deepcopy(self.tls_model)
+                services = model["services"]
+                services["api-gateway"]["environment"][key] = value
+                if key == "CONTENT_GRPC_SERVICE_TOKEN":
+                    services["content"]["environment"][key] = value
+                with self.assertRaisesRegex(ValueError, "Content TLS connection|unique 64-digit"):
+                    deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls, self.content_tls)
 
     def test_object_origin_cannot_share_the_web_hostname(self):
         model = copy.deepcopy(self.model["app"])

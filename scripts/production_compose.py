@@ -83,6 +83,9 @@ RUNNER_TLS_FILES = {
     "SANDBOX_GOJUDGE_TLS_CERT_FILE": "worker.pem",
     "SANDBOX_GOJUDGE_TLS_KEY_FILE": "worker-key.pem",
 }
+CONTENT_TLS_PATH = "/run/content/tls"
+CONTENT_TLS_GID = 10004
+CONTENT_TLS_FILES = {"server.pem": 0o644, "server-ca.pem": 0o644, "server-key.pem": 0o640}
 
 
 def check_private_env(path):
@@ -182,6 +185,25 @@ def check_runner_tls_files(directory, production=False):
         if production and (metadata.st_uid != 0 or metadata.st_gid != 10001
                            or stat.S_IMODE(metadata.st_mode) != 0o640):
             raise ValueError(f"{name}: expected root:10001 with mode 0640")
+
+
+def check_content_tls_files(directory, production=False):
+    if {file.name for file in directory.iterdir()} != CONTENT_TLS_FILES.keys():
+        raise ValueError("Content TLS directory must contain server.pem, server-key.pem and server-ca.pem")
+    if production:
+        if os.name != "posix" or directory.is_relative_to(ROOT):
+            raise ValueError("keep Content TLS files outside the repository on the Linux app host")
+        for parent in (directory, *directory.parents):
+            metadata = parent.stat()
+            if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+                raise ValueError("Content TLS directories must be root-owned and not writable by group or others")
+    for name, mode in CONTENT_TLS_FILES.items():
+        metadata = (directory / name).lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= 128 * 1024:
+            raise ValueError(f"{name}: expected a regular Content TLS file of at most 128 KiB")
+        group = CONTENT_TLS_GID if name == "server-key.pem" else 0
+        if production and (metadata.st_uid != 0 or metadata.st_gid != group or stat.S_IMODE(metadata.st_mode) != mode):
+            raise ValueError(f"{name}: wrong owner, group or permissions for Content TLS")
 
 
 def https_url(value, origin_only=False):
@@ -349,7 +371,31 @@ def check_service_tokens(services, used_secrets):
         used_secrets.add(value)
 
 
-def check_model(model, target, images, migration=None, runner_tls=None):
+def check_content_connection(services, enabled, used_secrets):
+    gateway = services["api-gateway"]["environment"]
+    content = services["content"]["environment"]
+    gateway_keys = ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_TLS_CA_FILE", "CONTENT_GRPC_INSECURE")
+    if not enabled:
+        if any(gateway.get(key) for key in gateway_keys):
+            raise ValueError("gateway: Content connection requires its TLS overlay")
+        return
+    if any(gateway.get(key) != value for key, value in {
+        "CONTENT_GRPC_ADDR": "content:9090",
+        "CONTENT_GRPC_TLS_CA_FILE": f"{CONTENT_TLS_PATH}/server-ca.pem",
+        "CONTENT_GRPC_INSECURE": "false",
+    }.items()):
+        raise ValueError("gateway: expected a verified Content TLS connection")
+    if (content.get("CONTENT_GRPC_TLS_CERT_FILE") != f"{CONTENT_TLS_PATH}/server.pem"
+            or content.get("CONTENT_GRPC_TLS_KEY_FILE") != f"{CONTENT_TLS_PATH}/server-key.pem"
+            or services["content"].get("group_add") != [str(CONTENT_TLS_GID)]):
+        raise ValueError("content: expected dedicated TLS certificate access")
+    token = gateway.get("CONTENT_GRPC_SERVICE_TOKEN")
+    if (not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token)
+            or token != content.get("CONTENT_GRPC_SERVICE_TOKEN") or token in used_secrets):
+        raise ValueError("content: both services need the same unique 64-digit random hex token")
+
+
+def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None):
     project = PROJECTS[target]
     services = model["services"]
     expected = APP_IMAGES if target == "app" else RUNNER_IMAGES
@@ -375,6 +421,10 @@ def check_model(model, target, images, migration=None, runner_tls=None):
         **{f"{name}-postgres": {POSTGRES_INIT} for name in DATABASES},
         **{f"{name}-grants": {POSTGRES_GRANTS} for name in DATABASES},
     }
+    if content_tls is not None:
+        allowed_mounts["content"] = {(content_tls / name, f"{CONTENT_TLS_PATH}/{name}")
+                                     for name in ("server.pem", "server-key.pem")}
+        allowed_mounts["api-gateway"] = {(content_tls / "server-ca.pem", f"{CONTENT_TLS_PATH}/server-ca.pem")}
     for name, service in services.items():
         if service["image"] != images[expected[name]] or service["platform"] != "linux/amd64":
             raise ValueError(f"{name}: image does not match the release")
@@ -451,18 +501,21 @@ def check_model(model, target, images, migration=None, runner_tls=None):
         raise ValueError("media: public URL must point to the media bucket on the object origin")
     check_minio_credentials(services, used_secrets)
     check_service_tokens(services, used_secrets)
+    check_content_connection(services, content_tls is not None, used_secrets)
 
 
-def compose_args(target, env_file):
+def compose_args(target, env_file, content_tls=None):
     args = ["docker", "compose", "--project-directory", str(ROOT)]
     if target == "app":
         args.extend(("--env-file", str(env_file), "-f", "docker-compose.yml", "-f", "deploy/compose.production.yml"))
+        if content_tls is not None:
+            args.extend(("-f", "deploy/compose.content-tls.yml"))
     else:
         args.extend(("-f", "deploy/compose.runner.yml"))
     return args
 
 
-def compose_env(images, migration=None, runner_tls=None):
+def compose_env(images, migration=None, runner_tls=None, content_tls=None):
     environment = {
         key: value for key, value in os.environ.items()
         if key.upper().startswith("DOCKER_") or key.upper() in (
@@ -478,6 +531,8 @@ def compose_env(images, migration=None, runner_tls=None):
         environment["RELEASE_SANDBOX_MIGRATION"] = str(migration)
     if runner_tls is not None:
         environment["RELEASE_RUNNER_TLS_DIR"] = str(runner_tls)
+    if content_tls is not None:
+        environment["RELEASE_CONTENT_TLS_DIR"] = str(content_tls)
     return environment
 
 
@@ -512,11 +567,12 @@ def main():
     parser.add_argument("--env-file", type=Path)
     parser.add_argument("--sandbox-migration", type=Path)
     parser.add_argument("--runner-tls-dir", type=Path)
+    parser.add_argument("--content-tls-dir", type=Path)
     args = parser.parse_args()
     app_files = (args.env_file, args.sandbox_migration, args.runner_tls_dir)
     if args.target == "app" and not all(app_files):
         parser.error("app requires --env-file, --sandbox-migration and --runner-tls-dir")
-    if args.target == "runner" and any(app_files):
+    if args.target == "runner" and (any(app_files) or args.content_tls_dir is not None):
         parser.error("runner does not accept application files")
 
     try:
@@ -525,6 +581,7 @@ def main():
         images = image_env(manifest, args.target)
         migration = None
         runner_tls = None
+        content_tls = None
         env_file = None
         if args.target == "app":
             env_file = (check_private_env(args.env_file) if args.action == "up"
@@ -533,9 +590,14 @@ def main():
             check_migration(manifest, migration)
             runner_tls = args.runner_tls_dir.resolve(strict=True)
             check_runner_tls_files(runner_tls, production=args.action == "up")
-        environment = compose_env(images, migration, runner_tls)
-        compose = compose_args(args.target, env_file)
-        check_model(check_compose(compose, environment), args.target, images, migration, runner_tls)
+            if args.content_tls_dir is not None:
+                if args.content_tls_dir.is_symlink():
+                    raise ValueError("Content TLS directory must not be a symlink")
+                content_tls = args.content_tls_dir.resolve(strict=True)
+                check_content_tls_files(content_tls, production=args.action == "up")
+        environment = compose_env(images, migration, runner_tls, content_tls)
+        compose = compose_args(args.target, env_file, content_tls)
+        check_model(check_compose(compose, environment), args.target, images, migration, runner_tls, content_tls)
         if args.action == "up":
             check_host(args.target, environment)
             subprocess.run([*compose, "up", "-d", "--no-build"], check=True, cwd=ROOT, env=environment)
