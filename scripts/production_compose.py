@@ -415,8 +415,9 @@ def check_material_activity(services):
     content = services["content"]["environment"]
     feed = services["feed"]["environment"]
     publisher = content.get("CONTENT_ACTIVITY_ENABLED", "false")
+    editorial = content.get("CONTENT_CONTRIBUTION_ENABLED", "false")
     cards = feed.get("FEED_MATERIAL_CARDS_ENABLED", "false")
-    if publisher not in ("true", "false") or cards not in ("true", "false"):
+    if any(flag not in ("true", "false") for flag in (publisher, editorial, cards)):
         raise ValueError("material activity flags must be true or false")
     material_topic = content.get("KAFKA_CONTENT_MATERIAL_TOPIC")
     feed_topic = feed.get("KAFKA_CONTENT_MATERIAL_TOPIC")
@@ -431,6 +432,20 @@ def check_material_activity(services):
         raise ValueError("Content activity requires Kafka publishing")
     if cards == "true" and (not feed_topic or not publishing):
         raise ValueError("material cards require a matching subscription and Content publishing")
+    if editorial != "true":
+        return
+    if not publishing:
+        raise ValueError("editorial activity requires Content material publishing")
+    topic_key = "KAFKA_CONTENT_CONTRIBUTION_TOPIC"
+    editorial_topic = content.get(topic_key)
+    plan = services.get("kafka-topics", {}).get("environment", {})
+    other_topics = (material_topic, private_topics[0], private_topics[1],
+                    feed.get("KAFKA_CATALOG_ACTIVITY_TOPIC"), feed.get("KAFKA_TASK_ACTIVITY_TOPIC"))
+    if (not isinstance(editorial_topic, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,248}", editorial_topic)
+            or editorial_topic != plan.get(topic_key)
+            or any(isinstance(topic, str) and editorial_topic.replace(".", "_") == topic.replace(".", "_")
+                   for topic in other_topics)):
+        raise ValueError("editorial activity requires a separate topic in the Kafka plan")
 
 
 def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None):

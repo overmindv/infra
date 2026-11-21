@@ -55,6 +55,32 @@ class MaterialActivityComposeTest(unittest.TestCase):
                 content["KAFKA_CONTENT_MATERIAL_TOPIC"] = private
                 deploy.check_material_activity(services)
 
+    def test_editorial_activity_requires_a_separate_provisioned_topic(self):
+        key = "KAFKA_CONTENT_CONTRIBUTION_TOPIC"
+        content = {
+            "CONTENT_ACTIVITY_ENABLED": "true",
+            "CONTENT_CONTRIBUTION_ENABLED": "true",
+            "KAFKA_ENABLED": "true",
+            "KAFKA_CONTENT_MATERIAL_TOPIC": "content.material.v1",
+            "KAFKA_CONTENT_LEARNING_TOPIC": "content.learning.v1",
+            key: "content.contribution.v1",
+        }
+        feed = {"KAFKA_TASK_ACTIVITY_TOPIC": "task.activity.v1"}
+        plan = {key: content[key]}
+        services = {"content": {"environment": content}, "feed": {"environment": feed}, "kafka-topics": {"environment": plan}}
+        deploy.check_material_activity(services)
+        content["CONTENT_ACTIVITY_ENABLED"] = "false"
+        with self.assertRaisesRegex(ValueError, "requires Content material publishing"):
+            deploy.check_material_activity(services)
+        content["CONTENT_ACTIVITY_ENABLED"] = "true"
+        plan[key] = "not-provisioned"
+        with self.assertRaisesRegex(ValueError, "separate topic in the Kafka plan"):
+            deploy.check_material_activity(services)
+        for shared in ("content_material.v1", "task.activity.v1", "content.learning.v1"):
+            with self.subTest(topic=shared), self.assertRaisesRegex(ValueError, "separate topic in the Kafka plan"):
+                content[key] = plan[key] = shared
+                deploy.check_material_activity(services)
+
 
 class ProductionComposeTest(unittest.TestCase):
     @classmethod
