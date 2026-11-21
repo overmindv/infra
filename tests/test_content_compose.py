@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "CONTENT_GRPC_SERVICE_TOKEN"
+CATALOG_URL = "CONTENT_ENTITIES_URL"
 
 
 class ContentComposeTest(unittest.TestCase):
@@ -39,7 +40,7 @@ class ContentComposeTest(unittest.TestCase):
 
             token = prepare()
             self.assertTrue(token == prepare(), "reinitialization changed the token")
-            env = {key: value for key, value in os.environ.items() if key != TOKEN}
+            env = {key: value for key, value in os.environ.items() if key not in {TOKEN, CATALOG_URL}}
             rendered = subprocess.run(
                 [
                     "docker", "compose", "--env-file", str(env_file), "--project-name", "content-compose-test",
@@ -49,6 +50,7 @@ class ContentComposeTest(unittest.TestCase):
             )
             services = json.loads(rendered.stdout)["services"]
             self.assertTrue(services["content"]["environment"].get(TOKEN) == token, "Content did not get its token")
+            self.assertEqual(services["content"]["environment"].get(CATALOG_URL), "http://entities:8080")
             grpc_ports = [port for port in services["content"]["ports"] if port["target"] == 9090]
             self.assertEqual(len(grpc_ports), 1)
             self.assertEqual(grpc_ports[0]["host_ip"], "127.0.0.1")
