@@ -55,6 +55,7 @@ class ProductionComposeTest(unittest.TestCase):
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
             "MEDIA_ENABLE_UPLOAD_CLEANUP=true",
+            "MEDIA_MAX_MULTIPART_SESSIONS=6",
             "MINIO_ROOT_USER=fixture-root",
             f"MINIO_ROOT_PASSWORD={101:040x}",
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
@@ -228,6 +229,16 @@ class ProductionComposeTest(unittest.TestCase):
         model["services"]["media"]["environment"]["MEDIA_ENABLE_UPLOAD_CLEANUP"] = "true"
         with self.assertRaisesRegex(ValueError, "approved retention rules"):
             self.check_app(model)
+
+    def test_multipart_session_limit_is_configurable(self):
+        model = copy.deepcopy(self.model["app"])
+        media = model["services"]["media"]["environment"]
+        self.assertEqual(media["MEDIA_MAX_MULTIPART_SESSIONS"], "6")
+        self.check_app(model)
+        for value in ("0", "-1", "1001", "unlimited"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "multipart session limit"):
+                media["MEDIA_MAX_MULTIPART_SESSIONS"] = value
+                self.check_app(model)
 
     def test_minio_bootstrap_and_runtime_must_agree(self):
         model = copy.deepcopy(self.model["app"])
