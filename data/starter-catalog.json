@@ -1,0 +1,1134 @@
+{
+  "version": 1,
+  "topics": [
+    {
+      "key": "sql",
+      "title": "SQL: запросы и аналитика",
+      "description": "Практика для подготовки к собеседованию: SQL: запросы и аналитика"
+    },
+    {
+      "key": "ml",
+      "title": "ML: обучение и валидация",
+      "description": "Практика для подготовки к собеседованию: ML: обучение и валидация"
+    },
+    {
+      "key": "metrics",
+      "title": "ML: метрики и статистика",
+      "description": "Практика для подготовки к собеседованию: ML: метрики и статистика"
+    },
+    {
+      "key": "nlp",
+      "title": "NLP: текст и эмбеддинги",
+      "description": "Практика для подготовки к собеседованию: NLP: текст и эмбеддинги"
+    },
+    {
+      "key": "cv",
+      "title": "CV: компьютерное зрение",
+      "description": "Практика для подготовки к собеседованию: CV: компьютерное зрение"
+    },
+    {
+      "key": "llm",
+      "title": "AI: LLM и RAG",
+      "description": "Практика для подготовки к собеседованию: AI: LLM и RAG"
+    },
+    {
+      "key": "python",
+      "title": "Python: подготовка к интервью",
+      "description": "Практика для подготовки к собеседованию: Python: подготовка к интервью"
+    },
+    {
+      "key": "mlops",
+      "title": "MLOps: эксплуатация моделей",
+      "description": "Практика для подготовки к собеседованию: MLOps: эксплуатация моделей"
+    }
+  ],
+  "tasks": [
+    {
+      "key": "sql-01",
+      "topic": "sql",
+      "title": "Фильтр пустых значений",
+      "statement": "Как выбрать строки, где email отсутствует (SQL NULL)?\n\nВыберите один ответ.",
+      "answers": [
+        "WHERE email IS NULL",
+        "WHERE email = NULL",
+        "WHERE email == NULL",
+        "WHERE email = \"NULL\""
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "sql-02",
+      "topic": "sql",
+      "title": "Количество строк и NULL",
+      "statement": "В столбце x значения 1, NULL, 3. Чему равен COUNT(x)?\n\nВыберите один ответ.",
+      "answers": [
+        "3",
+        "1",
+        "NULL",
+        "2"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "sql-03",
+      "topic": "sql",
+      "title": "Фильтрация групп",
+      "statement": "Какая конструкция отбирает группы после GROUP BY по COUNT(*) > 5?\n\nВыберите один ответ.",
+      "answers": [
+        "ORDER BY COUNT(*) > 5",
+        "LIMIT 5",
+        "HAVING COUNT(*) > 5",
+        "WHERE COUNT(*) > 5"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "sql-04",
+      "topic": "sql",
+      "title": "LEFT JOIN и отсутствующие заказы",
+      "statement": "Нужно получить всех клиентов, даже без заказов. Как соединить customers c и orders o по customer_id?\n\nВыберите один ответ.",
+      "answers": [
+        "orders o LEFT JOIN customers c ON o.customer_id = c.id",
+        "customers c LEFT JOIN orders o ON o.customer_id = c.id",
+        "customers c INNER JOIN orders o ON o.customer_id = c.id",
+        "customers c CROSS JOIN orders o"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "sql-05",
+      "topic": "sql",
+      "title": "Среднее с пропуском",
+      "statement": "Чему равен AVG(x) для значений 10, NULL, 20?\n\nВыберите один ответ.",
+      "answers": [
+        "15",
+        "10",
+        "30",
+        "NULL"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "sql-06",
+      "topic": "sql",
+      "title": "UNION и дубли",
+      "statement": "Какая операция объединяет результаты двух SELECT и сохраняет дубли?\n\nВыберите один ответ.",
+      "answers": [
+        "UNION",
+        "INTERSECT",
+        "EXCEPT",
+        "UNION ALL"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "sql-07",
+      "topic": "sql",
+      "title": "Второе место без пропусков",
+      "statement": "Для зарплат 100, 100, 90 какие ранги даст DENSE_RANK() OVER (ORDER BY salary DESC)?\n\nВыберите один ответ.",
+      "answers": [
+        "1, 1, 3",
+        "3, 2, 1",
+        "1, 1, 2",
+        "1, 2, 3"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "sql-08",
+      "topic": "sql",
+      "title": "Последняя запись пользователя",
+      "statement": "Как надёжно выбрать одну последнюю запись на пользователя при одинаковом created_at?\n\nВыберите один ответ.",
+      "answers": [
+        "DISTINCT user_id, created_at без сортировки",
+        "ROW_NUMBER по user_id с сортировкой created_at DESC, id DESC; затем rn = 1",
+        "GROUP BY user_id без агрегирования остальных полей",
+        "LIMIT 1 для всей таблицы"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "ml-01",
+      "topic": "ml",
+      "title": "Утечка при нормализации",
+      "statement": "Когда нужно обучать StandardScaler при оценке модели на отложенной выборке?\n\nВыберите один ответ.",
+      "answers": [
+        "Только на обучающей части",
+        "На всех данных до разбиения",
+        "Только на тестовой части",
+        "На объединённых train и test после предсказаний"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "ml-02",
+      "topic": "ml",
+      "title": "Переобучение по метрикам",
+      "statement": "Train accuracy = 0.99, validation accuracy = 0.65. Что наиболее вероятно?\n\nВыберите один ответ.",
+      "answers": [
+        "Модель гарантированно недообучена",
+        "Нет ошибок обобщения",
+        "Нужно оценивать только train",
+        "Переобучение"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "ml-03",
+      "topic": "ml",
+      "title": "Прогноз временного ряда",
+      "statement": "Как валидировать прогноз продаж следующего месяца?\n\nВыберите один ответ.",
+      "answers": [
+        "Обучать на будущем, проверять на прошлом",
+        "Включить целевую выручку следующего месяца в признаки",
+        "Обучать на прошлом, проверять на более позднем периоде",
+        "Перемешать даты и использовать любой random split"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "ml-04",
+      "topic": "ml",
+      "title": "Дисбаланс классов",
+      "statement": "Доля мошенничества 1%. Модель всегда отвечает «нет». Почему accuracy 99% недостаточно?\n\nВыберите один ответ.",
+      "answers": [
+        "Дисбаланс делает любое измерение невозможным",
+        "Модель не находит ни одного положительного случая",
+        "Accuracy всегда равна recall",
+        "Модель находит все мошеннические операции"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "ml-05",
+      "topic": "ml",
+      "title": "Регуляризация L2",
+      "statement": "Что добавляет L2-регуляризация линейной модели к функции потерь?\n\nВыберите один ответ.",
+      "answers": [
+        "Штраф за сумму квадратов коэффициентов",
+        "Штраф за число строк в train",
+        "Только увеличение learning rate",
+        "Обязательное зануление всех коэффициентов"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "ml-06",
+      "topic": "ml",
+      "title": "Разбиение по пациентам",
+      "statement": "У каждого пациента несколько снимков. Как избежать утечки личности пациента?\n\nВыберите один ответ.",
+      "answers": [
+        "Случайно делить все снимки независимо",
+        "Добавить ID пациента в целевой признак",
+        "Включить каждый снимок в обе части",
+        "Разделять train/test по пациентам"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "ml-07",
+      "topic": "ml",
+      "title": "Назначение тестовой выборки",
+      "statement": "Для чего нужна финальная test-выборка?\n\nВыберите один ответ.",
+      "answers": [
+        "Для многократного выбора лучшего набора параметров",
+        "Только для увеличения train",
+        "Для оценки после выбора модели и гиперпараметров",
+        "Для каждого шага градиентного спуска"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "ml-08",
+      "topic": "ml",
+      "title": "Случайный лес",
+      "statement": "Что означает bagging в случайном лесе?\n\nВыберите один ответ.",
+      "answers": [
+        "Обучение одного линейного классификатора",
+        "Обучение деревьев на bootstrap-выборках с агрегацией прогнозов",
+        "Последовательное исправление ошибок одного дерева следующим",
+        "Удаление случайных целевых меток"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "metrics-01",
+      "topic": "metrics",
+      "title": "Precision по матрице ошибок",
+      "statement": "TP = 30, FP = 10, FN = 20. Чему равен precision?\n\nВыберите один ответ.",
+      "answers": [
+        "0.75",
+        "0.60",
+        "0.50",
+        "0.90"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "metrics-02",
+      "topic": "metrics",
+      "title": "Recall по матрице ошибок",
+      "statement": "TP = 30, FP = 10, FN = 20. Чему равен recall?\n\nВыберите один ответ.",
+      "answers": [
+        "0.75",
+        "0.40",
+        "0.80",
+        "0.60"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "metrics-03",
+      "topic": "metrics",
+      "title": "Среднеквадратичная ошибка",
+      "statement": "Истинные значения [1, 3], прогноз [2, 1]. Чему равна MSE?\n\nВыберите один ответ.",
+      "answers": [
+        "5",
+        "0.5",
+        "2.5",
+        "1.5"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "metrics-04",
+      "topic": "metrics",
+      "title": "Средняя абсолютная ошибка",
+      "statement": "Истинные значения [1, 3], прогноз [2, 1]. Чему равна MAE?\n\nВыберите один ответ.",
+      "answers": [
+        "0.5",
+        "1.5",
+        "2.5",
+        "3"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "metrics-05",
+      "topic": "metrics",
+      "title": "Независимые события",
+      "statement": "Независимые события имеют вероятности 0.2 и 0.5. Какова вероятность обоих?\n\nВыберите один ответ.",
+      "answers": [
+        "0.1",
+        "0.7",
+        "0.3",
+        "0.4"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "metrics-06",
+      "topic": "metrics",
+      "title": "Медиана и выброс",
+      "statement": "Чему равна медиана [1, 2, 3, 4, 100]?\n\nВыберите один ответ.",
+      "answers": [
+        "22",
+        "4",
+        "100",
+        "3"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "metrics-07",
+      "topic": "metrics",
+      "title": "P-value",
+      "statement": "Как корректно интерпретировать p-value?\n\nВыберите один ответ.",
+      "answers": [
+        "Вероятность воспроизвести эффект без условий",
+        "Размер эффекта в процентах",
+        "При нулевой гипотезе вероятность наблюдать столь же или более экстремальную статистику",
+        "Вероятность истинности нулевой гипотезы"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "metrics-08",
+      "topic": "metrics",
+      "title": "Рандомизация A/B",
+      "statement": "Зачем случайно распределять пользователей по A/B-группам?\n\nВыберите один ответ.",
+      "answers": [
+        "Чтобы увеличить p-value до единицы",
+        "Чтобы уменьшить систематические различия между группами",
+        "Чтобы гарантировать положительный результат",
+        "Чтобы исключить любую случайную ошибку"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "nlp-01",
+      "topic": "nlp",
+      "title": "TF-IDF и редкие слова",
+      "statement": "При одинаковой частоте в документе какой термин обычно получает больший IDF?\n\nВыберите один ответ.",
+      "answers": [
+        "Термин, встречающийся в меньшем числе документов",
+        "Термин из каждого документа",
+        "Термин с большим числом букв независимо от корпуса",
+        "Любой стоп-термин всегда"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "nlp-02",
+      "topic": "nlp",
+      "title": "Косинусная близость",
+      "statement": "Чему равен косинус между векторами [1, 0] и [0, 1]?\n\nВыберите один ответ.",
+      "answers": [
+        "1",
+        "-1",
+        "2",
+        "0"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "nlp-03",
+      "topic": "nlp",
+      "title": "Нормирование эмбеддингов",
+      "statement": "Для единичных векторов скалярное произведение равно чему?\n\nВыберите один ответ.",
+      "answers": [
+        "Расстоянию Левенштейна",
+        "Числу токенов",
+        "Косинусной близости",
+        "Всегда единице"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "nlp-04",
+      "topic": "nlp",
+      "title": "Токенизация незнакомых слов",
+      "statement": "Чем полезна subword-токенизация?\n\nВыберите один ответ.",
+      "answers": [
+        "Всегда сохраняет один токен на предложение",
+        "Представляет редкие слова комбинациями известных частей",
+        "Гарантирует один токен на слово",
+        "Удаляет необходимость словаря в любом алгоритме"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "nlp-05",
+      "topic": "nlp",
+      "title": "Padding в attention",
+      "statement": "Зачем attention mask для padding-токенов?\n\nВыберите один ответ.",
+      "answers": [
+        "Чтобы не учитывать заполнители как содержимое",
+        "Чтобы считать заполнители целевой меткой",
+        "Чтобы увеличить длину исходного текста",
+        "Чтобы убрать позиционную информацию из всех токенов"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "nlp-06",
+      "topic": "nlp",
+      "title": "Утечка словаря",
+      "statement": "На какой части обучать TF-IDF при оценке классификатора?\n\nВыберите один ответ.",
+      "answers": [
+        "Только на test",
+        "На всём корпусе до разбиения всегда",
+        "На предсказанных классах",
+        "На train; validation/test только преобразовывать"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "nlp-07",
+      "topic": "nlp",
+      "title": "NER",
+      "statement": "Что решает named entity recognition?\n\nВыберите один ответ.",
+      "answers": [
+        "Только оценивает длину документа",
+        "Сжимает изображения",
+        "Находит упоминания сущностей и их типы в тексте",
+        "Только переводит текст"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "nlp-08",
+      "topic": "nlp",
+      "title": "Контекстный эмбеддинг",
+      "statement": "Почему представление слова «лук» может различаться в разных предложениях?\n\nВыберите один ответ.",
+      "answers": [
+        "Позиции слов не влияют ни на одну модель",
+        "Модель учитывает окружающий контекст",
+        "Всегда используется случайный вектор без обучения",
+        "Словарь обязан содержать только одно значение"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "cv-01",
+      "topic": "cv",
+      "title": "Аугментация и validation",
+      "statement": "Где обычно применяют случайные обучающие аугментации?\n\nВыберите один ответ.",
+      "answers": [
+        "В train; validation обрабатывают воспроизводимо",
+        "Только в test и без сохранения настроек",
+        "К целевым метрикам вместо изображений",
+        "Только после вычисления ошибки"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "cv-02",
+      "topic": "cv",
+      "title": "Размер свёртки",
+      "statement": "Вход 32×32, ядро 3×3, stride 1, padding 0. Каков пространственный размер выхода?\n\nВыберите один ответ.",
+      "answers": [
+        "32×32",
+        "16×16",
+        "34×34",
+        "30×30"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "cv-03",
+      "topic": "cv",
+      "title": "IoU",
+      "statement": "Площадь пересечения боксов 20, площадь объединения 50. Каков IoU?\n\nВыберите один ответ.",
+      "answers": [
+        "2.5",
+        "0.7",
+        "0.4",
+        "0.6"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "cv-04",
+      "topic": "cv",
+      "title": "Классификация и детекция",
+      "statement": "Чем object detection отличается от классификации целого изображения?\n\nВыберите один ответ.",
+      "answers": [
+        "Измеряет только качество камеры",
+        "Возвращает местоположение объектов и их классы",
+        "Не использует изображения",
+        "Всегда возвращает только одну метку без координат"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "cv-05",
+      "topic": "cv",
+      "title": "Сегментация",
+      "statement": "Что выдаёт семантическая сегментация?\n\nВыберите один ответ.",
+      "answers": [
+        "Класс для каждого пикселя",
+        "Только одну рамку на весь кадр",
+        "Только текстовый заголовок",
+        "Только частоту кадров"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "cv-06",
+      "topic": "cv",
+      "title": "Transfer learning",
+      "statement": "Что означает fine-tuning предобученной CV-модели?\n\nВыберите один ответ.",
+      "answers": [
+        "Удаление всех весов без обучения",
+        "Копирование тестовых меток в прогноз",
+        "Изменение только имени файла",
+        "Адаптацию её весов на новой задаче"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "cv-07",
+      "topic": "cv",
+      "title": "Разделение видео",
+      "statement": "Почему соседние кадры одного видео опасно случайно распределять между train и test?\n\nВыберите один ответ.",
+      "answers": [
+        "Любая камера выдаёт одинаковые классы",
+        "Это автоматически уменьшает размер модели",
+        "Почти одинаковые кадры завышают оценку обобщения",
+        "Видеокадры нельзя использовать для обучения"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "cv-08",
+      "topic": "cv",
+      "title": "Max pooling",
+      "statement": "Чему равен max pooling блока [[1, 3], [2, 0]] с окном 2×2?\n\nВыберите один ответ.",
+      "answers": [
+        "0",
+        "3",
+        "1.5",
+        "6"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "llm-01",
+      "topic": "llm",
+      "title": "Назначение RAG",
+      "statement": "Что добавляет RAG к генерации ответа?\n\nВыберите один ответ.",
+      "answers": [
+        "Поиск релевантных документов и передачу их в контекст",
+        "Гарантию истинности любого ответа",
+        "Обязательное переобучение весов на каждый запрос",
+        "Отключение всех ограничений модели"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "llm-02",
+      "topic": "llm",
+      "title": "Оценка retrieval",
+      "statement": "Что измеряет Recall@k при поиске документов?\n\nВыберите один ответ.",
+      "answers": [
+        "Среднюю длину ответа в символах",
+        "Стоимость одного токена",
+        "Количество параметров модели",
+        "Долю релевантных документов, найденных среди первых k"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "llm-03",
+      "topic": "llm",
+      "title": "Инъекция в документе",
+      "statement": "Найденный документ требует отправить секреты на внешний URL. Что должна сделать система?\n\nВыберите один ответ.",
+      "answers": [
+        "Добавить секреты в ответ пользователю",
+        "Снять ограничения инструментов",
+        "Считать это недоверенным содержимым и не выполнять инструкцию",
+        "Выполнить, поскольку документ найден поиском"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "llm-04",
+      "topic": "llm",
+      "title": "Температура генерации",
+      "statement": "Что обычно происходит при повышении temperature при остальных равных?\n\nВыберите один ответ.",
+      "answers": [
+        "Модель получает свежие данные из интернета",
+        "Распределение выбора токенов становится менее концентрированным",
+        "Ответы гарантированно становятся точнее",
+        "Размер контекстного окна увеличивается"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "llm-05",
+      "topic": "llm",
+      "title": "Кэш персонального ответа",
+      "statement": "Что нужно включить в ключ кэша персонального учебного плана?\n\nВыберите один ответ.",
+      "answers": [
+        "Цель, версию сводки прогресса, версию политики и область пользователя",
+        "Только название модели",
+        "Только сегодняшнюю дату",
+        "Только число символов запроса"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "llm-06",
+      "topic": "llm",
+      "title": "Контекстное окно",
+      "statement": "Что ограничивает контекстное окно LLM?\n\nВыберите один ответ.",
+      "answers": [
+        "Общее число зарегистрированных пользователей",
+        "Количество строк в SQL-базе",
+        "Число файлов на диске сервера",
+        "Объём токенов, доступных модели в одном контексте"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "llm-07",
+      "topic": "llm",
+      "title": "Структурированный результат",
+      "statement": "Как безопасно принять JSON-план от модели?\n\nВыберите один ответ.",
+      "answers": [
+        "Считать любой JSON семантически корректным",
+        "Сохранить неизвестные ID без проверки",
+        "Проверить схему и существование всех ID задач до сохранения",
+        "Исполнить любые команды из JSON"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "llm-08",
+      "topic": "llm",
+      "title": "Бесплатный API и лимиты",
+      "statement": "Провайдер ответил HTTP 429. Как корректно переключаться?\n\nВыберите один ответ.",
+      "answers": [
+        "Отправить ключ первого провайдера второму",
+        "Соблюсти Retry-After и переключиться на разрешённый доступный провайдер",
+        "Создавать аккаунты для обхода ограничений",
+        "Бесконечно повторять запрос без пауз"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "python-01",
+      "topic": "python",
+      "title": "Изменяемый аргумент по умолчанию",
+      "statement": "Почему def add(x, items=[]) может неожиданно сохранять данные между вызовами?\n\nВыберите один ответ.",
+      "answers": [
+        "Один список создаётся при определении функции и используется повторно",
+        "Каждый вызов создаёт отдельный список",
+        "Python запрещает списки в параметрах",
+        "Список автоматически становится глобальным словарём"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "python-02",
+      "topic": "python",
+      "title": "Копия списка",
+      "statement": "Что выведет a=[1]; b=a; b.append(2); print(a)?\n\nВыберите один ответ.",
+      "answers": [
+        "[1]",
+        "[2]",
+        "None",
+        "[1, 2]"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "python-03",
+      "topic": "python",
+      "title": "Генератор",
+      "statement": "Какое свойство отличает выражение (x*x for x in range(100)) от списка квадратов?\n\nВыберите один ответ.",
+      "answers": [
+        "Никогда не может завершиться",
+        "Возвращает строку",
+        "Вычисляет значения по мере итерации",
+        "Обязательно хранит все 100 квадратов сразу"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "python-04",
+      "topic": "python",
+      "title": "Сложность membership",
+      "statement": "Какова ожидаемая сложность проверки x in s для Python set при обычных предположениях о хешировании?\n\nВыберите один ответ.",
+      "answers": [
+        "O(2^n)",
+        "O(1)",
+        "O(n log n)",
+        "Всегда O(n²)"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "python-05",
+      "topic": "python",
+      "title": "Broadcasting NumPy",
+      "statement": "Какова форма результата сложения массивов форм (3, 1) и (1, 4)?\n\nВыберите один ответ.",
+      "answers": [
+        "(3, 4)",
+        "(1, 1)",
+        "(4, 3)",
+        "(3, 1, 4)"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "python-06",
+      "topic": "python",
+      "title": "Срез Python",
+      "statement": "Чему равно list(range(5))[1:4]?\n\nВыберите один ответ.",
+      "answers": [
+        "[1, 2, 3, 4]",
+        "[0, 1, 2, 3]",
+        "[2, 3, 4]",
+        "[1, 2, 3]"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "python-07",
+      "topic": "python",
+      "title": "Скалярное произведение",
+      "statement": "Чему равно скалярное произведение [1, 2, 3] и [4, 5, 6]?\n\nВыберите один ответ.",
+      "answers": [
+        "90",
+        "15",
+        "32",
+        "21"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "python-08",
+      "topic": "python",
+      "title": "Контекстный менеджер",
+      "statement": "Зачем открывать файл через with open(...) as f?\n\nВыберите один ответ.",
+      "answers": [
+        "Чтобы любой файл стал JSON",
+        "Чтобы гарантировать закрытие при выходе из блока, включая исключение",
+        "Чтобы автоматически удалить файл",
+        "Чтобы запретить чтение"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "mlops-01",
+      "topic": "mlops",
+      "title": "Воспроизводимость эксперимента",
+      "statement": "Что нужно сохранить для повторения ML-эксперимента?\n\nВыберите один ответ.",
+      "answers": [
+        "Версии данных, кода, окружения, параметры и seed",
+        "Только итоговую accuracy",
+        "Только название ноутбука",
+        "Только размер экрана"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "mlops-02",
+      "topic": "mlops",
+      "title": "Data drift",
+      "statement": "Что называют data drift?\n\nВыберите один ответ.",
+      "answers": [
+        "Любое переименование модели",
+        "Увеличение числа комментариев в коде",
+        "Удаление логотипа приложения",
+        "Изменение распределения входных данных"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "mlops-03",
+      "topic": "mlops",
+      "title": "Версионирование артефакта",
+      "statement": "Зачем хранить версию модели вместе с предсказанием?\n\nВыберите один ответ.",
+      "answers": [
+        "Чтобы отказаться от мониторинга",
+        "Чтобы увеличить входной вектор",
+        "Чтобы расследовать ошибки и сравнивать поведение версий",
+        "Чтобы гарантировать отсутствие ошибок"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "mlops-04",
+      "topic": "mlops",
+      "title": "Training-serving skew",
+      "statement": "Какой случай является training-serving skew?\n\nВыберите один ответ.",
+      "answers": [
+        "Разработчик фиксирует зависимости",
+        "Признак считается иначе при обучении и в production",
+        "Модель получает одинаковую предобработку везде",
+        "Сервис хранит версию данных"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "easy"
+    },
+    {
+      "key": "mlops-05",
+      "topic": "mlops",
+      "title": "Канареечный релиз",
+      "statement": "Как выглядит canary-выпуск модели?\n\nВыберите один ответ.",
+      "answers": [
+        "Новая версия сначала получает небольшую долю трафика с мониторингом",
+        "Старая версия удаляется до любых проверок",
+        "Новая версия запускается только на train",
+        "Все ошибки скрываются от метрик"
+      ],
+      "correct": [
+        0
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "mlops-06",
+      "topic": "mlops",
+      "title": "Логи без утечки",
+      "statement": "Что безопаснее записывать в журнал AI-плана?\n\nВыберите один ответ.",
+      "answers": [
+        "API-ключ и пароль пользователя",
+        "Все приватные документы без ограничения",
+        "Полный JWT в каждом сообщении",
+        "Request ID, модель, токены, задержку, код ошибки и версию сводки"
+      ],
+      "correct": [
+        3
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "mlops-07",
+      "topic": "mlops",
+      "title": "Отложенные метки",
+      "statement": "Как оценивать качество модели, когда истинные метки поступают через неделю?\n\nВыберите один ответ.",
+      "answers": [
+        "Заменить качество числом запросов",
+        "Использовать уверенность как гарантированную точность",
+        "Связывать прогнозы с поздними метками по устойчивому ID",
+        "Считать все свежие прогнозы правильными"
+      ],
+      "correct": [
+        2
+      ],
+      "difficulty": "medium"
+    },
+    {
+      "key": "mlops-08",
+      "topic": "mlops",
+      "title": "Повторная доставка события",
+      "statement": "Как потребитель должен обрабатывать повтор одного события?\n\nВыберите один ответ.",
+      "answers": [
+        "Игнорировать все последующие события пользователя",
+        "Идемпотентно, не повторяя уже применённый эффект",
+        "Всегда создавать вторую запись",
+        "Удалять всю историю"
+      ],
+      "correct": [
+        1
+      ],
+      "difficulty": "medium"
+    }
+  ],
+  "sources": [
+    "https://leetcode.com/problems/recyclable-and-low-fat-products/",
+    "https://leetcode.com/problems/find-customer-referee/",
+    "https://leetcode.com/problems/big-countries/",
+    "https://leetcode.com/problems/article-views-i/",
+    "https://leetcode.com/problems/invalid-tweets/",
+    "https://leetcode.com/problems/replace-employee-id-with-the-unique-identifier/",
+    "https://leetcode.com/problems/product-sales-analysis-i/",
+    "https://leetcode.com/problems/customer-who-visited-but-did-not-make-any-transactions/",
+    "https://leetcode.com/problems/rising-temperature/",
+    "https://leetcode.com/problems/average-time-of-process-per-machine/",
+    "https://leetcode.com/problems/employee-bonus/",
+    "https://leetcode.com/problems/students-and-examinations/",
+    "https://leetcode.com/problems/managers-with-at-least-5-direct-reports/",
+    "https://leetcode.com/problems/confirmation-rate/",
+    "https://leetcode.com/problems/not-boring-movies/",
+    "https://leetcode.com/problems/average-selling-price/",
+    "https://leetcode.com/problems/project-employees-i/",
+    "https://leetcode.com/problems/percentage-of-users-attended-a-contest/",
+    "https://leetcode.com/problems/queries-quality-and-percentage/",
+    "https://leetcode.com/problems/monthly-transactions-i/",
+    "https://leetcode.com/problems/immediate-food-delivery-ii/",
+    "https://leetcode.com/problems/game-play-analysis-iv/",
+    "https://leetcode.com/problems/number-of-unique-subjects-taught-by-each-teacher/",
+    "https://leetcode.com/problems/user-activity-for-the-past-30-days-i/",
+    "https://leetcode.com/problems/product-sales-analysis-iii/",
+    "https://leetcode.com/problems/classes-with-at-least-5-students/",
+    "https://leetcode.com/problems/find-followers-count/",
+    "https://leetcode.com/problems/biggest-single-number/",
+    "https://leetcode.com/problems/customers-who-bought-all-products/",
+    "https://leetcode.com/problems/the-number-of-employees-which-report-to-each-employee/",
+    "https://leetcode.com/problems/primary-department-for-each-employee/",
+    "https://leetcode.com/problems/triangle-judgement/",
+    "https://leetcode.com/problems/consecutive-numbers/",
+    "https://leetcode.com/problems/product-price-at-a-given-date/",
+    "https://leetcode.com/problems/last-person-to-fit-in-the-bus/",
+    "https://leetcode.com/problems/count-salary-categories/",
+    "https://leetcode.com/problems/employees-whose-manager-left-the-company/",
+    "https://leetcode.com/problems/exchange-seats/",
+    "https://leetcode.com/problems/movie-rating/",
+    "https://leetcode.com/problems/restaurant-growth/",
+    "https://leetcode.com/problems/friend-requests-ii-who-has-the-most-friends/",
+    "https://leetcode.com/problems/investments-in-2016/",
+    "https://leetcode.com/problems/department-top-three-salaries/",
+    "https://leetcode.com/problems/fix-names-in-a-table/",
+    "https://leetcode.com/problems/patients-with-a-condition/",
+    "https://leetcode.com/problems/delete-duplicate-emails/",
+    "https://leetcode.com/problems/second-highest-salary/",
+    "https://leetcode.com/problems/group-sold-products-by-the-date/",
+    "https://leetcode.com/problems/list-the-products-ordered-in-a-period/",
+    "https://leetcode.com/problems/find-users-with-valid-e-mails/",
+    "https://leetcode.com/problems/two-sum/",
+    "https://leetcode.com/problems/valid-parentheses/",
+    "https://leetcode.com/problems/merge-two-sorted-lists/",
+    "https://leetcode.com/problems/best-time-to-buy-and-sell-stock/",
+    "https://leetcode.com/problems/valid-palindrome/",
+    "https://leetcode.com/problems/invert-binary-tree/",
+    "https://leetcode.com/problems/binary-search/",
+    "https://leetcode.com/problems/flood-fill/",
+    "https://leetcode.com/problems/maximum-subarray/",
+    "https://leetcode.com/problems/climbing-stairs/",
+    "https://leetcode.com/problem-list/oy4y273c/"
+  ]
+}
