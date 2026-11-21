@@ -120,6 +120,45 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match the pinned source trees"):
             release.build(self.workspace, plan)
 
+    def test_builds_declared_renderer_target_from_the_pinned_service_source(self):
+        stage_images = {"users-renderer": ("users", "Dockerfile", "renderer")}
+        with patch.object(release, "STAGE_IMAGES", stage_images):
+            self.assertNotIn("users-renderer", self.plan()["images"])
+            with (self.repo / "Dockerfile").open("ab") as spec:
+                spec.write(b"FROM scratch AS renderer\nFROM scratch AS api\n")
+            git(self.repo, "add", "Dockerfile")
+            git(self.repo, "commit", "-qm", "Renderer fixture")
+            sha = git(self.repo, "rev-parse", "HEAD").decode().strip()
+            git(self.repo, "update-ref", "refs/remotes/origin/main", sha)
+            self.sources["users"] = sha
+
+            plan = self.plan()
+            image = plan["images"]["users-renderer"]
+            self.assertEqual(image, {**plan["images"]["users"], "target": "renderer"})
+            image["target"] = "api"
+            with self.assertRaisesRegex(ValueError, "unexpected image source"):
+                release.validate_plan(plan)
+            image["target"] = "renderer"
+            commands = []
+            run = subprocess.run
+
+            def check_build(command, **opts):
+                if command[0] != "docker":
+                    return run(command, **opts)
+                commands.append(command)
+                path = Path(command[command.index("--file") + 1])
+                self.assertIn(f"FROM alpine@{DIGEST}", path.read_text(encoding="utf-8"))
+                return subprocess.CompletedProcess(command, 0)
+
+            with patch("subprocess.run", side_effect=check_build), patch.object(
+                release, "inspect", return_value=DIGEST
+            ):
+                receipt = release.build(self.workspace, plan)
+            self.assertEqual(receipt["local_images"].keys(), {"users", "users-renderer"})
+            direct, renderer = commands
+            self.assertNotIn("--target", direct)
+            self.assertEqual(renderer[renderer.index("--target") + 1], "renderer")
+
     def test_publish_refuses_replaced_image_before_tagging(self):
         receipt = {"plan": self.plan(), "local_images": {"users": DIGEST}}
         with patch.object(release, "inspect", return_value=PUSHED_DIGEST):

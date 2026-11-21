@@ -62,6 +62,20 @@ class ReleasePolicyTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "every published image"):
             release_images(release)
 
+    def test_planned_renderer_requires_its_own_digest(self):
+        release = release_fixture()
+        release["plan"]["images"]["media-renderer"] = {
+            "source": "media", "dockerfile": "Dockerfile", "target": "renderer",
+        }
+        with self.assertRaisesRegex(ValueError, "every published image"):
+            release_images(release)
+        release["images"]["media-renderer"] = f"{REGISTRY}/media@{DIGEST}"
+        with self.assertRaisesRegex(ValueError, "expected published image digest"):
+            release_images(release)
+        reference = f"{REGISTRY}/media-renderer@{DIGEST}"
+        release["images"]["media-renderer"] = reference
+        self.assertEqual(release_images(release)["media-renderer"], reference)
+
     def test_expiring_exception_applies_only_to_exact_revision_and_finding(self):
         sources = release_fixture()["plan"]["sources"]
         images = release_images(release_fixture())

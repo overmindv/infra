@@ -19,6 +19,7 @@ DOCKERFILES.update({
     "sandbox": ("sandbox", "deployments/docker/Dockerfile.worker"),
     "gojudge": ("sandbox", "deployments/docker/Dockerfile.gojudge-runtime"),
 })
+STAGE_IMAGES = {"media-renderer": ("media", "Dockerfile", "renderer")}
 REPOS = {"infra", *(repo for repo, _ in DOCKERFILES.values())}
 UPSTREAM = {
     "kafka": "apache/kafka:4.3.1",

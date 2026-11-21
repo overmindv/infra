@@ -10,7 +10,7 @@ import uuid
 from pathlib import Path
 
 from release_sources import (
-    DIGEST, DOCKERFILES, IMAGE, REPOS, SHA, UPSTREAM,
+    DIGEST, DOCKERFILES, IMAGE, REPOS, SHA, STAGE_IMAGES, UPSTREAM,
     archive, git, image_name, metadata, pin_dockerfile, pinned_image,
     remote_source, verify_ref,
 )
@@ -73,8 +73,14 @@ def make_plan(workspace, sources, pins, registry, release):
     images = {}
     for service, (name, path) in sorted(DOCKERFILES.items()):
         spec = git(repositories[name], "show", f"{sources[name]}:{path}").decode()
-        _, bases = pin_dockerfile(spec, pins)
+        pinned, bases = pin_dockerfile(spec, pins)
         images[service] = {"source": name, "dockerfile": path, "bases": bases}
+        for stage_service, (repo, dockerfile, stage) in STAGE_IMAGES.items():
+            if (repo, dockerfile) == (name, path) and any(
+                line.startswith("FROM ") and line.endswith(f" AS {stage}")
+                for line in pinned.splitlines()
+            ):
+                images[stage_service] = {**images[service], "target": stage}
     return {
         "version": 1, "release": release, "registry": registry, "platform": PLATFORM,
         "sources": sources, "pins": pins, "metadata": records,
@@ -86,11 +92,15 @@ def validate_plan(plan):
     if not isinstance(plan, dict) or plan.get("version") != 1:
         raise ValueError("unsupported release plan")
     plan_inputs(plan["sources"], plan["pins"], plan["registry"], plan["release"])
-    if plan["platform"] != PLATFORM or plan["images"].keys() != DOCKERFILES.keys():
+    images = plan["images"]
+    staged = {service: (repo, path, target) for service, (repo, path, target)
+              in STAGE_IMAGES.items() if service in images}
+    if plan["platform"] != PLATFORM or images.keys() != DOCKERFILES.keys() | staged.keys():
         raise ValueError("unexpected platform or image set in release plan")
-    for service, (name, path) in DOCKERFILES.items():
-        image = plan["images"][service]
-        if image["source"] != name or image["dockerfile"] != path:
+    expected = {service: (repo, path, None) for service, (repo, path) in DOCKERFILES.items()}
+    for service, (name, path, target) in (expected | staged).items():
+        image = images[service]
+        if (image["source"], image["dockerfile"], image.get("target")) != (name, path, target):
             raise ValueError(f"{service}: unexpected image source")
     if plan["upstream"] != {
         name: pinned_image(ref, plan["pins"]) for name, ref in UPSTREAM.items()
@@ -99,7 +109,7 @@ def validate_plan(plan):
 
 
 def labels_for(plan, service, plan_id):
-    name = DOCKERFILES[service][0]
+    name = plan["images"][service]["source"]
     return {
         "org.opencontainers.image.source": remote_source(name),
         "org.opencontainers.image.revision": plan["sources"][name],
@@ -133,21 +143,27 @@ def build(workspace, plan):
         with tempfile.TemporaryDirectory(prefix="overmindv-release-") as payload:
             context = Path(payload)
             archive(workspace / name, plan["sources"][name], context)
-            for service, (repo, path) in DOCKERFILES.items():
-                if name != repo:
+            pinned_paths = set()
+            for service, image in sorted(plan["images"].items()):
+                if name != image["source"]:
                     continue
+                path = image["dockerfile"]
                 dockerfile = context / path
-                spec = git(workspace / name, "show", f'{plan["sources"][name]}:{path}')
-                if dockerfile.read_bytes() != spec:
-                    raise ValueError(f"{service}: archive changed the Dockerfile")
-                pinned, _ = pin_dockerfile(spec.decode(), plan["pins"])
-                dockerfile.write_bytes(pinned.encode())
+                if path not in pinned_paths:
+                    spec = git(workspace / name, "show", f'{plan["sources"][name]}:{path}')
+                    if dockerfile.read_bytes() != spec:
+                        raise ValueError(f"{service}: archive changed the Dockerfile")
+                    pinned, _ = pin_dockerfile(spec.decode(), plan["pins"])
+                    dockerfile.write_bytes(pinned.encode())
+                    pinned_paths.add(path)
                 labels = labels_for(plan, service, plan_id)
                 local = f"overmindv-release/{service}:{uuid.uuid4().hex}"
                 command = [
                     "docker", "buildx", "build", "--load", "--platform", PLATFORM,
                     "--tag", local, "--file", str(dockerfile),
                 ]
+                if target := image.get("target"):
+                    command.extend(("--target", target))
                 for key, value in labels.items():
                     command.extend(("--label", f"{key}={value}"))
                 subprocess.run([*command, str(context)], check=True)
@@ -158,7 +174,7 @@ def build(workspace, plan):
 def publish(receipt):
     plan, images = receipt["plan"], receipt["local_images"]
     validate_plan(plan)
-    if images.keys() != DOCKERFILES.keys():
+    if images.keys() != plan["images"].keys():
         raise ValueError("build receipt must contain every release image")
     plan_id = fingerprint(plan)
     for service, image_id in images.items():

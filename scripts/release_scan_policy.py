@@ -3,7 +3,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, timedelta
 
 from release_manifest import validate_plan
-from release_sources import DIGEST, DOCKERFILES, SHA, UPSTREAM
+from release_sources import DIGEST, DOCKERFILES, SHA, STAGE_IMAGES, UPSTREAM
 
 
 SECRET_SCANNERS = {"source-secret", "image-secret"}
@@ -28,7 +28,7 @@ class Finding:
 def release_images(manifest):
     plan, images = manifest["plan"], manifest["images"]
     validate_plan(plan)
-    if images.keys() != DOCKERFILES.keys():
+    if images.keys() != plan["images"].keys():
         raise ValueError("release manifest must contain every published image")
     for name, ref in images.items():
         expected = f'{plan["registry"]}/{name}@'
@@ -42,12 +42,13 @@ def release_images(manifest):
 def read_exceptions(entries, sources, today):
     if not isinstance(entries, list):
         raise ValueError("exceptions must be a JSON array")
+    image_targets = DOCKERFILES.keys() | STAGE_IMAGES.keys() | UPSTREAM.keys()
     targets = {
         "go": sources - {"infra", "frontend"},
         "npm": {"frontend"},
-        "container": DOCKERFILES.keys() | UPSTREAM.keys(),
+        "container": image_targets,
         "source-secret": sources,
-        "image-secret": DOCKERFILES.keys() | UPSTREAM.keys(),
+        "image-secret": image_targets,
     }
     allowed = {}
     fields = {

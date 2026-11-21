@@ -813,6 +813,32 @@ services:
         condition: service_healthy
     restart: "no"
 
+  media-renderer:
+    build:
+      context: ../media
+      target: renderer
+      args:
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+    user: "10002:10003"
+    network_mode: none
+    read_only: true
+    init: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    cpus: 1
+    mem_limit: 384m
+    memswap_limit: 384m
+    pids_limit: 32
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=96m,mode=0700,uid=10002,gid=10003
+    volumes:
+      - type: volume
+        source: media-renderer-socket
+        target: /run/media-renderer
+        volume:
+          nocopy: true
+    restart: unless-stopped
+
   media:
     build:
       context: ../media
@@ -838,8 +864,17 @@ services:
       MEDIA_ALLOW_UNSCANNED_LOCAL: ${MEDIA_ALLOW_UNSCANNED_LOCAL:-false}
       MEDIA_USER_QUOTA_BYTES: ${MEDIA_USER_QUOTA_BYTES:-5368709120}
       MEDIA_MAX_AVATAR_BYTES: ${MEDIA_MAX_AVATAR_BYTES:-20971520}
-      MEDIA_MAX_AVATAR_PIXELS: ${MEDIA_MAX_AVATAR_PIXELS:-40000000}
+      MEDIA_MAX_AVATAR_PIXELS: ${MEDIA_MAX_AVATAR_PIXELS:-20971520}
+    volumes:
+      - type: volume
+        source: media-renderer-socket
+        target: /run/media-renderer
+        read_only: true
+        volume:
+          nocopy: true
     depends_on:
+      media-renderer:
+        condition: service_started
       media-migrate:
         condition: service_completed_successfully
       media-buckets:
@@ -868,5 +903,11 @@ volumes:
   feed-postgres:
   recommendations-postgres:
   media-postgres:
+  media-renderer-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1m,mode=0750,uid=10002,gid=10003,nosuid,nodev,noexec
   minio-data:
   clamav-data:
