@@ -59,6 +59,7 @@ x-db-grants-env: &db-grants-env
   PGOPTIONS: "-c statement_timeout=10000"
 
 services:
+  catalog-bootstrap: !reset null
   kafka-ui: !reset null
   gojudge: !reset null
   gojudge-compiler: !reset null
@@ -663,6 +664,7 @@ services:
         condition: service_completed_successfully
 
 volumes:
+  catalog-bootstrap-state: !reset null
   sandbox-postgres:
 
 networks:

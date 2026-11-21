@@ -167,6 +167,18 @@ class ProductionComposeTest(unittest.TestCase):
         self.assertEqual(self.model["runner"]["services"].keys(), deploy.RUNNER_IMAGES.keys())
         self.assertTrue(self.model["runner"]["services"].keys().isdisjoint(self.model["app"]["services"]))
 
+    def test_catalog_bootstrap_is_local_only(self):
+        service = "catalog-bootstrap"
+        volume = "catalog-bootstrap-state"
+        local = deploy.check_compose([
+            "docker", "compose", "--project-directory", str(deploy.ROOT),
+            "--env-file", str(deploy.ROOT / ".env.example"), "-f", "docker-compose.yml",
+        ], deploy.compose_env({}))
+        self.assertIn(service, local["services"])
+        self.assertIn(volume, local["volumes"])
+        self.assertNotIn(service, self.model["app"]["services"])
+        self.assertNotIn(volume, self.model["app"]["volumes"])
+
     def test_learner_goals_use_the_internal_topic_catalog(self):
         services = self.model["app"]["services"]
         recommendations = services["recommendations"]
