@@ -34,6 +34,13 @@ HTTP-методы учебного профиля и целей описаны �
 `ENTITIES_SNAPSHOT_TOKEN` для Entities и Recommendations. Пустое значение
 выключает синхронизацию. Токен снимка не передается в Gateway или клиенту.
 
+Для локальной проекции задач и материалов задай
+`RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED=true` и
+`CONTENT_ACTIVITY_ENABLED=true`. Помимо токена снимка Entities нужны отдельные
+`TASKS_RESOURCE_TOKEN` и `CONTENT_GRPC_CATALOG_TOKEN`. Каждый токен получают
+только его владелец и Recommendations. Production Compose пока не включает
+эту проекцию: для нее нужен защищенный транспорт до каталогов и Kafka.
+
 `recommendations-contract` собирает два Go binary и запускает их на локальных временных
 портах с synthetic upstream. Проверяет GraphQL/HTTP, actor isolation, бюджет, историю
 и безопасные отказы. Без БД проверяет preview. Если задана

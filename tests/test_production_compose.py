@@ -146,6 +146,11 @@ class ProductionComposeTest(unittest.TestCase):
         env[SNAPSHOT_TOKEN] = cls.snapshot_token
         cls.snapshot_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
         env.pop(SNAPSHOT_TOKEN)
+        env["RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED"] = "true"
+        env["CONTENT_GRPC_CATALOG_TOKEN"] = f"{704:064x}"
+        cls.resource_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
+        env.pop("RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED")
+        env.pop("CONTENT_GRPC_CATALOG_TOKEN")
         env.update({MODERATION_TOKEN: f"{902:064x}", "CONTENT_ACTIVITY_ENABLED": "true"})
         cls.moderation_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
         cls.moderation_without_tls = deploy.check_compose(deploy.compose_args("app", fixture), env)
@@ -181,6 +186,11 @@ class ProductionComposeTest(unittest.TestCase):
             if SNAPSHOT_TOKEN in svc.get("environment", {})
         }
         self.assertEqual(recipients, {"entities": self.snapshot_token, "recommendations": self.snapshot_token})
+
+    def test_resource_projection_stays_off_without_production_transports(self):
+        services = self.resource_model["services"]
+        self.assertEqual(services["recommendations"]["environment"]["RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED"], "false")
+        self.assertTrue(all("CONTENT_GRPC_CATALOG_TOKEN" not in svc.get("environment", {}) for svc in services.values()))
 
     def test_image_tag_is_rejected(self):
         release = copy.deepcopy(self.release)
