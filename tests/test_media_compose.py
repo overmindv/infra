@@ -34,5 +34,5 @@ class MediaComposeTest(unittest.TestCase):
         policy = json.loads(Path(mount["source"]).read_text(encoding="utf-8"))
         self.assertEqual(policy["Statement"], [{
             "Effect": "Allow", "Principal": "*", "Action": "s3:GetObject",
-            "Resource": "arn:aws:s3:::media/public/verified/*",
+            "Resource": "arn:aws:s3:::media/public/verified/variants/*/*.webp",
         }])
