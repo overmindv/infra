@@ -140,7 +140,7 @@ for index in "${!repos[@]}"; do
   [ -n "$BRANCH" ] && branch="$BRANCH"
   branches[$index]="$branch"
   echo "== $(repo_name "$repo"): fetch origin/$branch"
-  if ! git -C "$repo" fetch --prune origin "$branch"; then
+  if ! git -C "$repo" fetch --quiet --prune origin "$branch"; then
     echo "! $(repo_name "$repo"): fetch не удался; checkout и merge не выполнялись" >&2
     exit 1
   fi
@@ -166,15 +166,15 @@ for index in "${!repos[@]}"; do
   name=$(repo_name "$repo")
   echo "== $name: обновление $branch"
   if git -C "$repo" show-ref --verify --quiet "refs/heads/$branch"; then
-    if ! git -C "$repo" switch "$branch"; then
+    if ! git -C "$repo" switch --quiet "$branch"; then
       echo "! $name: не удалось переключиться на $branch" >&2
       exit 1
     fi
-  elif ! git -C "$repo" switch -c "$branch" --track "origin/$branch"; then
+  elif ! git -C "$repo" switch --quiet -c "$branch" --track "origin/$branch"; then
     echo "! $name: не удалось создать tracking-ветку $branch" >&2
     exit 1
   fi
-  if ! git -C "$repo" merge --ff-only "origin/$branch"; then
+  if ! git -C "$repo" merge --quiet --ff-only "origin/$branch"; then
     echo "! $name: fast-forward не выполнен; разрешите конфликт локально" >&2
     exit 1
   fi

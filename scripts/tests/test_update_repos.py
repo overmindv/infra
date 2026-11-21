@@ -94,6 +94,8 @@ class UpdateReposTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((local / "state.txt").read_text(), "remote\n")
         self.assertEqual(self.codegraph_log.read_text(), f"sync {self.root}\n")
+        self.assertNotIn("Updating ", result.stdout)
+        self.assertNotIn("Fast-forward", result.stdout)
 
     def test_initializes_missing_codegraph(self):
         self.create_repo("service")
