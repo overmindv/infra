@@ -374,6 +374,9 @@ def check_service_tokens(services, used_secrets):
 def check_content_connection(services, enabled, used_secrets):
     gateway = services["api-gateway"]["environment"]
     content = services["content"]["environment"]
+    binding_keys = {"CONTENT_MEDIA_URL", "CONTENT_MEDIA_TOKEN", "MEDIA_CONTENT_TOKEN"}
+    if any(service.get("environment", {}).get(key) for service in services.values() for key in binding_keys):
+        raise ValueError("content: local Media binding credentials cannot reach production")
     gateway_keys = ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_TLS_CA_FILE", "CONTENT_GRPC_INSECURE")
     if not enabled:
         if any(gateway.get(key) for key in gateway_keys):

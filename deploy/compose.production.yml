@@ -451,6 +451,8 @@ services:
     environment:
       DATABASE_URL: postgres://overmind_app:${CONTENT_POSTGRES_PASSWORD:?production database password required}@content-postgres:5432/content?sslmode=disable
       ENV: production
+      CONTENT_MEDIA_URL: !reset null
+      CONTENT_MEDIA_TOKEN: !reset null
     depends_on:
       content-grants:
         condition: service_completed_successfully
@@ -529,6 +531,7 @@ services:
       MEDIA_ENABLE_UPLOAD_CLEANUP: "false"
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?production service token required}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:?production service token required}
+      MEDIA_CONTENT_TOKEN: !reset null
       MEDIA_S3_PUBLIC_ENDPOINT: ${MEDIA_S3_PUBLIC_ENDPOINT:?public HTTPS S3 endpoint required}
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?public HTTPS media URL required}
       MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?limited S3 access key required}

@@ -65,6 +65,7 @@ class ProductionComposeTest(unittest.TestCase):
             "MEDIA_S3_ACCESS_KEY=ovm-media-00000001",
             f"MEDIA_S3_SECRET_KEY={102:040x}",
             f"CONTENT_GRPC_SERVICE_TOKEN={700:064x}",
+            f"MEDIA_CONTENT_TOKEN={701:064x}",
             "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.example.org",
             "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.example.org/media",
             "CORS_ORIGINS=https://app.fixture.example.org",
@@ -177,6 +178,16 @@ class ProductionComposeTest(unittest.TestCase):
         for key in ("CONTENT_GRPC_ADDR", "CONTENT_GRPC_SERVICE_TOKEN", "CONTENT_GRPC_INSECURE", "CONTENT_GRPC_TIMEOUT"):
             with self.subTest(key=key):
                 self.assertFalse(gateway.get(key))
+
+    def test_production_does_not_inherit_local_media_binding_credentials(self):
+        model = copy.deepcopy(self.model["app"])
+        services = model["services"]
+        self.assertFalse(services["content"]["environment"].get("CONTENT_MEDIA_URL"))
+        self.assertFalse(services["content"]["environment"].get("CONTENT_MEDIA_TOKEN"))
+        self.assertFalse(services["media"]["environment"].get("MEDIA_CONTENT_TOKEN"))
+        services["content"]["environment"]["CONTENT_MEDIA_URL"] = "http://media:8080"
+        with self.assertRaisesRegex(ValueError, "local Media binding credentials"):
+            self.check_app(model)
 
     def test_content_tls_overlay_keeps_private_key_out_of_gateway(self):
         deploy.check_content_tls_files(self.content_tls)

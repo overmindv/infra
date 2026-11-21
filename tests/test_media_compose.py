@@ -8,9 +8,10 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def render_compose():
+def render_compose(binding_token=""):
     env = os.environ.copy()
     env.pop("MEDIA_ALLOW_UNSCANNED_LOCAL", None)
+    env["MEDIA_CONTENT_TOKEN"] = binding_token
     rendered = subprocess.run(
         ["docker", "compose", "--env-file", ".env.example", "--profile", "antivirus",
          "config", "--format", "json"],
@@ -20,6 +21,19 @@ def render_compose():
 
 
 class MediaComposeTest(unittest.TestCase):
+    def test_content_media_token_is_local_and_scoped(self):
+        token = "content-binding-fixture-" * 2
+        services = render_compose(token)["services"]
+        self.assertEqual(services["content"]["environment"]["CONTENT_MEDIA_URL"], "http://media:8080")
+        self.assertEqual(services["content"]["environment"]["CONTENT_MEDIA_TOKEN"], token)
+        self.assertEqual(services["media"]["environment"]["MEDIA_CONTENT_TOKEN"], token)
+        for name, service in services.items():
+            if name not in ("content", "media"):
+                self.assertNotIn(token, service.get("environment", {}).values())
+        disabled = render_compose()["services"]
+        self.assertFalse(disabled["content"]["environment"].get("CONTENT_MEDIA_URL"))
+        self.assertFalse(disabled["content"]["environment"].get("CONTENT_MEDIA_TOKEN"))
+
     def test_scanner_and_public_bucket_are_restricted(self):
         services = render_compose()["services"]
         self.assertEqual(services["media"]["environment"]["MEDIA_ALLOW_UNSCANNED_LOCAL"], "false")
