@@ -128,6 +128,12 @@ expect_denied TopicAuthorizationException consume feed content.learning.v1 feed-
 learning="${key}|self-reported-reading-fixture"
 printf '%s\n' "$learning" | produce content content.learning.v1
 expect_record "$learning" recommendations content.learning.v1 recommendations-learning-evidence-v1
+goal="${key}|goal-completion-fixture"
+printf '%s\n' "$goal" | produce recommendations learning.goal.v1
+expect_record "$goal" fixture_admin learning.goal.v1 fixture-read-goal
+printf '%s\n' "$goal" | expect_denied TopicAuthorizationException produce tasks learning.goal.v1
+expect_denied TopicAuthorizationException consume recommendations learning.goal.v1 recommendations-learning-evidence-v1
+expect_denied TopicAuthorizationException consume feed learning.goal.v1 feed-v1
 editorial="${key}|accepted-editorial-fixture"
 printf '%s\n' "$editorial" | produce content content.contribution.v1
 expect_denied TopicAuthorizationException consume feed content.contribution.v1 feed-v1

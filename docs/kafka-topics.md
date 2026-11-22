@@ -16,6 +16,7 @@ sh scripts/kafka/topics.sh plan
 | `catalog.activity.v1`, `task.activity.v1` | Entities, Tasks | Feed |
 | `content.content-item-events` | Content | Нет подключенного потребителя |
 | `learning.outcome.v1`, `content.learning.v1` | Tasks, Content | Recommendations, группа `recommendations-learning-evidence-v1` |
+| `learning.goal.v1` | Recommendations | Право чтения не выдается до подключения Rating |
 | `content.material.v1` | Content | Feed (`feed-v1`), право чтения также зарезервировано для Recommendations |
 | `content.contribution.v1` | Content | Пока нет потребителя |
 | `user.deleted.v1` | Зарезервирован | ACL нет до согласования контракта Users |

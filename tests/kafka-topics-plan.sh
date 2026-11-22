@@ -5,12 +5,13 @@ script=./scripts/kafka/topics.sh
 plan=$(sh "$script" plan)
 for topic in code-execution.requests.v1 code-execution.results.v1 code-execution.retry.v1 \
     code-execution.events.v1 code-execution.deadletter.v1 content.content-item-events \
-    catalog.activity.v1 task.activity.v1 learning.outcome.v1 content.material.v1 \
+    catalog.activity.v1 task.activity.v1 learning.outcome.v1 learning.goal.v1 content.material.v1 \
     content.learning.v1 content.contribution.v1 user.deleted.v1; do
     printf '%s\n' "$plan" | awk -v topic="$topic" '$1 == topic { count++ } END { exit count != 1 }'
 done
 printf '%s\n' "$plan" | grep -Fxq 'user.deleted.v1 262144 - - -'
 printf '%s\n' "$plan" | grep -Fxq 'content.material.v1 262144 content feed feed-v1'
+printf '%s\n' "$plan" | grep -Fxq 'learning.goal.v1 262144 recommendations - -'
 if printf '%s\n' "$plan" | grep -q 'code-execution\..*\.v2'; then
     exit 1
 fi
@@ -25,6 +26,7 @@ reject() {
     fi
 }
 reject KAFKA_RESULTS_TOPIC=learning.outcome.v1
+reject KAFKA_CONTENT_LEARNING_TOPIC=learning.goal.v1
 reject KAFKA_RESULTS_TOPIC=code-execution_requests_v1
 reject KAFKA_REQUESTS_TOPIC=--alter
 reject 'KAFKA_REQUESTS_TOPIC= leading-space'
