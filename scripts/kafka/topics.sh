@@ -71,6 +71,7 @@ catalog() {
     row "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" "$legacy_max" entities feed "$feed_group"
     row "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}" "$legacy_max" tasks feed "$feed_group"
     row learning.outcome.v1 "$metadata_max" tasks recommendations recommendations-learning-evidence-v1
+    row learning.goal.v1 "$metadata_max" recommendations - -
     row "$material_topic" "$metadata_max" content feed "$feed_group"
     row "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" "$metadata_max" content recommendations recommendations-learning-evidence-v1
     row "${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}" "$metadata_max" content - -
@@ -85,8 +86,8 @@ catalog() {
 }
 
 rows=$(catalog)
-expected=13
-[ "$v2" = false ] || expected=18
+expected=14
+[ "$v2" = false ] || expected=19
 printf '%s\n' "$rows" | awk -v expected="$expected" '
     NF != 5 { bad = 1 }
     {
