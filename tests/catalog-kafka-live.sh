@@ -13,6 +13,12 @@ base() {
 secure() {
     base -f "$root/deploy/compose.catalog-kafka-tls.yml" "$@"
 }
+feed_tls() {
+    secure -f "$root/deploy/compose.feed-kafka-tls.yml" "$@"
+}
+feed_rollback() {
+    secure -f "$root/deploy/compose.feed-kafka-rollback.yml" "$@"
+}
 fixture_chown() {
     docker run --rm --network none --user 0:0 --entrypoint chown \
         --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
@@ -34,7 +40,9 @@ mkdir -m 755 "$RELEASE_CATALOG_KAFKA_TLS_DIR" "$CATALOG_KAFKA_TEST_DATA"
 OVM_KAFKA_CATALOG_BROKER_PASSWORD=$(openssl rand -hex 32)
 OVM_KAFKA_CATALOG_ADMIN_PASSWORD=$(openssl rand -hex 32)
 OVM_KAFKA_CATALOG_ENTITIES_PASSWORD=$(openssl rand -hex 32)
+OVM_KAFKA_FEED_PASSWORD=$(openssl rand -hex 32)
 export OVM_KAFKA_CATALOG_BROKER_PASSWORD OVM_KAFKA_CATALOG_ADMIN_PASSWORD OVM_KAFKA_CATALOG_ENTITIES_PASSWORD
+export OVM_KAFKA_FEED_PASSWORD
 
 make_ca() {
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 \
@@ -80,12 +88,20 @@ read_catalog() {
     base exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 \
         --topic catalog.activity.v1 --group feed-v1 --from-beginning --max-messages 2 --timeout-ms 8000
 }
+read_one() {
+    bootstrap=$1
+    topic=$2
+    group=$3
+    shift 3
+    base exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" \
+        --topic "$topic" --group "$group" --from-beginning --max-messages 1 --timeout-ms 8000 "$@"
+}
 expect_denied() {
     error=$1
     shift
     "$@" > "$work/denied" 2>&1 || :
     if ! grep -Fq "$error" "$work/denied"; then
-        printf 'Expected Kafka rejection: %s\n' "$error" >&2
+        printf 'Expected Kafka rejection: %s for %s %s %s\n' "$error" "$1" "$2" "$3" >&2
         exit 1
     fi
 }
@@ -127,3 +143,38 @@ printf '%s\n' 'catalog|wrong-ca' | expect_denied SSLHandshakeException produce k
 printf '%s\n' 'catalog|wrong-password' | expect_denied SaslAuthenticationException produce kafka:9094 \
     catalog.activity.v1 --command-config /tmp/wrong-password.properties
 printf '%s\n' 'Catalog TLS, preserved records and Kafka ACLs passed'
+
+properties catalog_admin "$OVM_KAFKA_CATALOG_ADMIN_PASSWORD" ca.pem admin.properties
+offsets=$(base exec -T kafka /opt/kafka/bin/kafka-consumer-groups.sh --bootstrap-server kafka:9094 \
+    --command-config /tmp/admin.properties --describe --group feed-v1)
+printf '%s\n' "$offsets" | awk '$1 == "feed-v1" && $2 == "catalog.activity.v1" && $4 == 2 { found=1 } END { exit !found }'
+
+feed_tls up -d kafka
+wait_kafka
+feed_tls run --rm -T --no-deps kafka-topics
+save_client ca.pem < "$work/kafka-ca.pem"
+properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+properties entities "$OVM_KAFKA_CATALOG_ENTITIES_PASSWORD" ca.pem entities.properties
+printf '%s\n' 'catalog|feed-after-tls' | produce kafka:9094 catalog.activity.v1 --command-config /tmp/entities.properties
+[ "$(read_one kafka:9094 catalog.activity.v1 feed-v1 --command-config /tmp/feed.properties)" = feed-after-tls ]
+printf '%s\n' 'catalog|feed-cannot-write' | expect_denied TopicAuthorizationException produce kafka:9094 \
+    catalog.activity.v1 --command-config /tmp/feed.properties --command-property enable.idempotence=false
+expect_denied TopicAuthorizationException read_one kafka:9094 learning.goal.v1 feed-v1 \
+    --command-config /tmp/feed.properties
+expect_denied GroupAuthorizationException read_one kafka:9092 content.material.v1 feed-v1
+expect_denied TopicAuthorizationException read_one kafka:9092 catalog.activity.v1 recommendations-learning-evidence-v1
+printf '%s\n' 'material|legacy-recommendations' | produce kafka:9092 content.material.v1
+[ "$(read_one kafka:9092 content.material.v1 recommendations-learning-evidence-v1)" = legacy-recommendations ]
+
+# An ordinary catalog provisioning run must not silently reopen old Feed access.
+secure run --rm -T --no-deps kafka-topics
+expect_denied GroupAuthorizationException read_one kafka:9092 content.material.v1 feed-v1
+
+feed_rollback up -d kafka
+wait_kafka
+feed_rollback run --rm -T --no-deps kafka-topics
+save_client ca.pem < "$work/kafka-ca.pem"
+properties entities "$OVM_KAFKA_CATALOG_ENTITIES_PASSWORD" ca.pem entities.properties
+printf '%s\n' 'catalog|feed-after-rollback' | produce kafka:9094 catalog.activity.v1 --command-config /tmp/entities.properties
+[ "$(read_one kafka:9092 catalog.activity.v1 feed-v1)" = feed-after-rollback ]
+printf '%s\n' 'Feed TLS and explicit rollback preserved consumer offsets'

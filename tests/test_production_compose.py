@@ -115,6 +115,7 @@ class ProductionComposeTest(unittest.TestCase):
             *passwords,
             *(f"{name}={index + 100:064x}" for index, name in enumerate(deploy.SERVICE_TOKENS)),
             *(f"{name}={index + 800:064x}" for index, name in enumerate(deploy.CATALOG_KAFKA_CREDENTIALS)),
+            f"{deploy.FEED_KAFKA_CREDENTIAL}={850:064x}",
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
@@ -163,6 +164,11 @@ class ProductionComposeTest(unittest.TestCase):
         cls.catalog_model = deploy.check_compose(
             deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls), env
         )
+        cls.feed_kafka = {}
+        for mode in ("tls", "rollback"):
+            cls.feed_kafka[mode] = deploy.check_compose(
+                deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls, feed_kafka=mode), env
+            )
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -219,6 +225,35 @@ class ProductionComposeTest(unittest.TestCase):
                 model["services"][service]["environment"][key] = value
                 deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
                                    catalog_kafka_tls=self.catalog_tls)
+
+    def test_feed_kafka_tls_and_rollback_keep_the_other_clients(self):
+        for mode, model in self.feed_kafka.items():
+            with self.subTest(mode=mode):
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   catalog_kafka_tls=self.catalog_tls, feed_kafka=mode)
+                for peer in ("tasks", "content", "sandbox", "recommendations", "entities"):
+                    self.assertEqual(model["services"][peer], self.catalog_model["services"][peer])
+                self.assertEqual(model["services"]["feed"]["environment"]["FEED_CONSUMER_GROUP"],
+                                 self.catalog_model["services"]["feed"]["environment"]["FEED_CONSUMER_GROUP"])
+        self.assertEqual(self.feed_kafka["rollback"]["services"]["feed"], self.catalog_model["services"]["feed"])
+        with self.assertRaisesRegex(ValueError, "requires the catalog Kafka TLS"):
+            deploy.check_model(self.feed_kafka["tls"], "app", self.images["app"], self.migration,
+                               self.runner_tls, feed_kafka="tls")
+
+    def test_feed_kafka_tls_rejects_a_changed_group_or_exposed_password(self):
+        for service, key, value in (
+            ("feed", "FEED_CONSUMER_GROUP", "feed-new"),
+            ("feed", "KAFKA_TASK_ACTIVITY_TOPIC", "other"),
+            ("feed", "KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+            ("feed", "KAFKA_CONTENT_MATERIAL_TOPIC", "wrong.material.v1"),
+            ("kafka-topics", "OVM_KAFKA_FEED_TLS", "rollback"),
+            ("sandbox", deploy.FEED_KAFKA_CREDENTIAL, "unexpected"),
+        ):
+            with self.subTest(service=service, key=key), self.assertRaisesRegex(ValueError, "Kafka|Feed"):
+                model = copy.deepcopy(self.feed_kafka["tls"])
+                model["services"][service]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   catalog_kafka_tls=self.catalog_tls, feed_kafka="tls")
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]
