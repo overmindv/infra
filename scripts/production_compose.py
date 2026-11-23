@@ -434,6 +434,29 @@ def check_service_tokens(services, used_secrets):
         used_secrets.add(value)
 
 
+def check_catalog_logo_connection(services, used_secrets):
+    placement = {
+        "ENTITIES_MEDIA_URL": "entities",
+        "ENTITIES_MEDIA_TOKEN": "entities",
+        "MEDIA_ENTITIES_TOKEN": "media",
+    }
+    if any(service.get("environment", {}).get(key)
+           for name, service in services.items() for key, owner in placement.items() if name != owner):
+        raise ValueError("catalog logo: unexpected Media binding credentials")
+    entities = services["entities"]["environment"]
+    origin = entities.get("ENTITIES_MEDIA_URL")
+    token = entities.get("ENTITIES_MEDIA_TOKEN")
+    media_token = services["media"]["environment"].get("MEDIA_ENTITIES_TOKEN")
+    if not (origin or token or media_token):
+        return
+    if origin != "http://media:8080":
+        raise ValueError("catalog logo: expected the internal Media endpoint")
+    if (not isinstance(token, str) or not re.fullmatch(r"[a-f0-9]{64}", token)
+            or token != media_token or token in used_secrets):
+        raise ValueError("catalog logo: both services need the same unique 64-digit token")
+    used_secrets.add(token)
+
+
 def check_content_connection(services, enabled, used_secrets):
     gateway = services["api-gateway"]["environment"]
     content = services["content"]["environment"]
@@ -773,6 +796,7 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
         raise ValueError("media: public URL must point to the media bucket on the object origin")
     check_minio_credentials(services, used_secrets)
     check_service_tokens(services, used_secrets)
+    check_catalog_logo_connection(services, used_secrets)
     check_content_connection(services, content_tls is not None, used_secrets)
     check_material_activity(services)
     check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets, feed_kafka, content_kafka)

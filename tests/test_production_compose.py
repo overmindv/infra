@@ -133,6 +133,7 @@ class ProductionComposeTest(unittest.TestCase):
             f"MEDIA_S3_SECRET_KEY={102:040x}",
             f"CONTENT_GRPC_SERVICE_TOKEN={700:064x}",
             f"MEDIA_CONTENT_TOKEN={701:064x}",
+            f"MEDIA_ENTITIES_TOKEN={709:064x}",
             "MEDIA_S3_PUBLIC_ENDPOINT=https://s3.fixture.example.org",
             "MEDIA_PUBLIC_BASE_URL=https://s3.fixture.example.org/media",
             "CORS_ORIGINS=https://app.fixture.example.org",
@@ -152,6 +153,10 @@ class ProductionComposeTest(unittest.TestCase):
                 deploy.compose_env(cls.images[target])
             )
             cls.model[target] = deploy.check_compose(deploy.compose_args(target, fixture), env)
+        cls.logo_token = f"{710:064x}"
+        env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls)
+        env["MEDIA_ENTITIES_PRODUCTION_TOKEN"] = cls.logo_token
+        cls.logo_model = deploy.check_compose(deploy.compose_args("app", fixture), env)
         env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, cls.content_tls)
         cls.tls_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
         cls.snapshot_token = f"{703:064x}"
@@ -454,6 +459,34 @@ class ProductionComposeTest(unittest.TestCase):
         self.assertEqual([Path(volume["source"]).name for volume in gateway["volumes"] if volume["type"] == "bind"],
                          ["server-ca.pem"])
         self.assertIn("10004", services["content"]["group_add"])
+
+    def test_catalog_logo_production_token_scope(self):
+        disabled = self.model["app"]["services"]
+        self.assertFalse(disabled["entities"]["environment"].get("ENTITIES_MEDIA_URL"))
+        self.assertFalse(disabled["entities"]["environment"].get("ENTITIES_MEDIA_TOKEN"))
+        self.assertFalse(disabled["media"]["environment"].get("MEDIA_ENTITIES_TOKEN"))
+        self.check_app(self.logo_model)
+        services = self.logo_model["services"]
+        self.assertEqual(services["entities"]["environment"]["ENTITIES_MEDIA_URL"], "http://media:8080")
+        self.assertEqual(services["entities"]["environment"]["ENTITIES_MEDIA_TOKEN"], self.logo_token)
+        self.assertEqual(services["media"]["environment"]["MEDIA_ENTITIES_TOKEN"], self.logo_token)
+
+        for kind in ("reused", "mismatch", "leaked", "external"):
+            with self.subTest(kind=kind):
+                model = copy.deepcopy(self.logo_model)
+                services = model["services"]
+                entities = services["entities"]["environment"]
+                media = services["media"]["environment"]
+                if kind == "reused":
+                    entities["ENTITIES_MEDIA_TOKEN"] = media["MEDIA_ENTITIES_TOKEN"] = media["MEDIA_GATEWAY_TOKEN"]
+                elif kind == "mismatch":
+                    media["MEDIA_ENTITIES_TOKEN"] = ""
+                elif kind == "leaked":
+                    services["sandbox"]["environment"]["ENTITIES_MEDIA_TOKEN"] = self.logo_token
+                else:
+                    entities["ENTITIES_MEDIA_URL"] = "https://other.fixture.invalid"
+                with self.assertRaisesRegex(ValueError, "catalog logo"):
+                    self.check_app(model)
 
     def test_content_tls_overlay_rejects_plaintext_and_reused_token(self):
         for key, value in (("CONTENT_GRPC_INSECURE", "true"),
