@@ -25,6 +25,12 @@ sandbox_tls() {
 sandbox_rollback() {
     feed_tls -f "$root/deploy/compose.sandbox-kafka-rollback.yml" "$@"
 }
+content_tls() {
+    feed_tls -f "$root/deploy/compose.content-kafka-tls.yml" "$@"
+}
+content_rollback() {
+    feed_tls -f "$root/deploy/compose.content-kafka-rollback.yml" "$@"
+}
 fixture_chown() {
     docker run --rm --network none --user 0:0 --entrypoint chown \
         --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
@@ -186,8 +192,58 @@ sandbox_rollout() {
     printf '%s\n' 'Sandbox SCRAM, task requests, results and offsets survived rollout and rollback'
 }
 
+content_rollout() {
+    material=content.material.v1
+    learning=content.learning.v1
+    recommendations_group=recommendations-learning-evidence-v1
+    OVM_KAFKA_CONTENT_PASSWORD=$(openssl rand -hex 32)
+    export OVM_KAFKA_CONTENT_PASSWORD
+
+    feed_tls up -d kafka
+    wait_kafka
+    feed_tls run --rm -T --no-deps kafka-topics
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    printf '%s\n' 'material|before-tls' | produce kafka:9092 "$material"
+    [ "$(read_one kafka:9094 "$material" feed-v1 --command-config /tmp/feed.properties)" = before-tls ]
+    [ "$(read_one kafka:9092 "$material" "$recommendations_group")" = before-tls ]
+
+    content_tls up -d kafka
+    wait_kafka
+    content_tls run --rm -T --no-deps kafka-topics
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties content "$OVM_KAFKA_CONTENT_PASSWORD" ca.pem content.properties
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    printf '%s\n' 'material|after-tls' | produce kafka:9094 "$material" --command-config /tmp/content.properties
+    [ "$(read_one kafka:9094 "$material" feed-v1 --command-config /tmp/feed.properties)" = after-tls ]
+    [ "$(read_one kafka:9092 "$material" "$recommendations_group")" = after-tls ]
+    printf '%s\n' 'material|learning-evidence' | produce kafka:9094 "$learning" --command-config /tmp/content.properties
+    [ "$(read_one kafka:9092 "$learning" "$recommendations_group")" = learning-evidence ]
+    printf '%s\n' 'material|anonymous-write' | expect_denied TopicAuthorizationException \
+        produce kafka:9092 "$material" --command-property enable.idempotence=false
+    printf '%s\n' 'material|foreign-write' | expect_denied TopicAuthorizationException \
+        produce kafka:9094 "$material" --command-config /tmp/feed.properties --command-property enable.idempotence=false
+    printf '%s\n' 'material|other-topic' | expect_denied TopicAuthorizationException \
+        produce kafka:9094 catalog.activity.v1 --command-config /tmp/content.properties \
+        --command-property enable.idempotence=false
+
+    content_rollback up -d kafka
+    wait_kafka
+    content_rollback run --rm -T --no-deps kafka-topics
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties content "$OVM_KAFKA_CONTENT_PASSWORD" ca.pem content.properties
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    printf '%s\n' 'material|revoked-account' | expect_denied SaslAuthenticationException \
+        produce kafka:9094 "$material" --command-config /tmp/content.properties
+    printf '%s\n' 'material|after-rollback' | produce kafka:9092 "$material"
+    [ "$(read_one kafka:9094 "$material" feed-v1 --command-config /tmp/feed.properties)" = after-rollback ]
+    [ "$(read_one kafka:9092 "$material" "$recommendations_group")" = after-rollback ]
+    printf '%s\n' 'Content TLS, consumer offsets and the explicit rollback passed'
+}
+
 case "${1:-}" in
     sandbox) sandbox_rollout; exit ;;
+    content) content_rollout; exit ;;
     '') ;;
     *) exit 2 ;;
 esac

@@ -51,21 +51,30 @@ case "${1:-}" in
     broker)
         broker=${OVM_KAFKA_CATALOG_BROKER_PASSWORD:-}
         entities=${OVM_KAFKA_CATALOG_ENTITIES_PASSWORD:-}
-        password "$broker" && password "$entities" &&
-            [ "$broker" != "$admin" ] && [ "$broker" != "$entities" ] &&
-            [ "$admin" != "$entities" ] || bad_password
+        seen="$admin"
+        check_distinct() {
+            password "$1" || bad_password
+            case " $seen " in *" $1 "*) bad_password ;; esac
+            seen="$seen $1"
+        }
+        check_distinct "$broker"
+        check_distinct "$entities"
         export KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG="$plain username=\"broker\" password=\"$broker\" user_broker=\"$broker\";"
         export KAFKA_LISTENER_NAME_REPLICA_PLAIN_SASL_JAAS_CONFIG="$KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG"
         users="user_catalog_admin=\"$admin\" user_entities=\"$entities\""
         if [ "${OVM_KAFKA_FEED_PASSWORD+x}" ]; then
             feed=$OVM_KAFKA_FEED_PASSWORD
-            password "$feed" && [ "$feed" != "$broker" ] && [ "$feed" != "$admin" ] &&
-                [ "$feed" != "$entities" ] || bad_password
+            check_distinct "$feed"
             users="$users user_feed=\"$feed\""
+        fi
+        if [ "${OVM_KAFKA_CONTENT_PASSWORD+x}" ]; then
+            content=$OVM_KAFKA_CONTENT_PASSWORD
+            check_distinct "$content"
+            users="$users user_content=\"$content\""
         fi
         export KAFKA_LISTENER_NAME_SECURE_PLAIN_SASL_JAAS_CONFIG="$plain $users;"
         unset OVM_KAFKA_CATALOG_BROKER_PASSWORD OVM_KAFKA_CATALOG_ADMIN_PASSWORD OVM_KAFKA_CATALOG_ENTITIES_PASSWORD
-        unset OVM_KAFKA_FEED_PASSWORD
+        unset OVM_KAFKA_FEED_PASSWORD OVM_KAFKA_CONTENT_PASSWORD
         exec /__cacert_entrypoint.sh /etc/kafka/docker/run
         ;;
     provision)
