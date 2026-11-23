@@ -19,6 +19,14 @@ jobs:
       - name: Test monitoring rules and scripts
         run: sh scripts/check-monitoring.sh
 
+  catalog-kafka:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check catalog Kafka TLS and legacy client access
+        run: sh tests/catalog-kafka-live.sh
+
   # E2E-CI отключён
   # e2e:
   #   permissions:

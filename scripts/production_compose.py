@@ -86,6 +86,13 @@ RUNNER_TLS_FILES = {
 CONTENT_TLS_PATH = "/run/content/tls"
 CONTENT_TLS_GID = 10004
 CONTENT_TLS_FILES = {"server.pem": 0o644, "server-ca.pem": 0o644, "server-key.pem": 0o640}
+CATALOG_KAFKA_PATH = "/run/kafka"
+CATALOG_KAFKA_FILES = {"broker.pem": (1000, 0o640), "ca.pem": (0, 0o644)}
+CATALOG_KAFKA_CREDENTIALS = {
+    "OVM_KAFKA_CATALOG_BROKER_PASSWORD": (),
+    "OVM_KAFKA_CATALOG_ADMIN_PASSWORD": (("kafka-topics", "OVM_KAFKA_CATALOG_ADMIN_PASSWORD"),),
+    "OVM_KAFKA_CATALOG_ENTITIES_PASSWORD": (("entities", "KAFKA_SASL_PASSWORD"),),
+}
 
 
 def check_private_env(path):
@@ -212,6 +219,24 @@ def https_url(value, origin_only=False):
         url.scheme == "https" and url.hostname and not url.username and not url.password
         and not url.query and not url.fragment and (not origin_only or not url.path)
     )
+
+
+def check_catalog_kafka_files(directory, production=False):
+    if {file.name for file in directory.iterdir()} != CATALOG_KAFKA_FILES.keys():
+        raise ValueError("Kafka TLS directory must contain only broker.pem and ca.pem")
+    if production:
+        if os.name != "posix" or directory.is_relative_to(ROOT):
+            raise ValueError("keep Kafka TLS files outside the repository on the Linux app host")
+        for parent in (directory, *directory.parents):
+            metadata = parent.stat()
+            if metadata.st_uid != 0 or metadata.st_mode & 0o022:
+                raise ValueError("Kafka TLS directories must be root-owned and not group or world writable")
+    for name, (group, mode) in CATALOG_KAFKA_FILES.items():
+        metadata = (directory / name).lstat()
+        if not stat.S_ISREG(metadata.st_mode) or not 0 < metadata.st_size <= 128 * 1024:
+            raise ValueError(f"{name}: expected a regular Kafka TLS file of at most 128 KiB")
+        if production and (metadata.st_uid != 0 or metadata.st_gid != group or stat.S_IMODE(metadata.st_mode) != mode):
+            raise ValueError(f"{name}: wrong owner, group or permissions for Kafka TLS")
 
 
 def runner_origin(value):
@@ -448,7 +473,68 @@ def check_material_activity(services):
         raise ValueError("editorial activity requires a separate topic in the Kafka plan")
 
 
-def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None):
+def check_catalog_kafka(services, enabled, used_secrets):
+    envs = {name: service.get("environment", {}) for name, service in services.items()}
+    broker = envs["kafka"]
+    entities = envs["entities"]
+    expected_keys = {
+        ("entities", "KAFKA_SASL_PASSWORD"),
+        ("kafka-topics", "OVM_KAFKA_CATALOG_ADMIN_PASSWORD"),
+        *(("kafka", key) for key in CATALOG_KAFKA_CREDENTIALS),
+    } if enabled else set()
+    actual_keys = {
+        (name, key) for name, env in envs.items() for key in env
+        if key in CATALOG_KAFKA_CREDENTIALS or (name == "entities" and key == "KAFKA_SASL_PASSWORD")
+    }
+    if actual_keys != expected_keys:
+        raise ValueError("Kafka catalog credentials require the TLS overlay and must stay in their services")
+    if not enabled:
+        return
+    entry = ["/bin/sh", "/opt/overmind/kafka/catalog-tls.sh"]
+    job = services["kafka-topics"]
+    if (services["kafka"]["entrypoint"] != [*entry, "broker"] or job["entrypoint"] != entry
+            or job["command"] != ["provision"] or not job.get("read_only")
+            or job.get("tmpfs") != ["/tmp:size=16m,mode=1777,nosuid,nodev,noexec"]
+            or not must_wait_for(services["entities"], "kafka-topics")):
+        raise ValueError("expected private Kafka provisioning before Entities startup")
+    if any(broker.get(key) != value for key, value in {
+        "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": (
+            "CONTROLLER:SASL_PLAINTEXT,REPLICA:SASL_PLAINTEXT,INTERNAL:PLAINTEXT,SECURE:SASL_SSL"
+        ),
+        "KAFKA_LISTENERS": "CONTROLLER://127.0.0.1:9093,REPLICA://127.0.0.1:9095,INTERNAL://:9092,SECURE://:9094",
+        "KAFKA_ADVERTISED_LISTENERS": "REPLICA://127.0.0.1:9095,INTERNAL://kafka:9092,SECURE://kafka:9094",
+        "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@127.0.0.1:9093",
+        "KAFKA_INTER_BROKER_LISTENER_NAME": "REPLICA",
+        "KAFKA_SSL_KEYSTORE_TYPE": "PEM",
+        "KAFKA_SSL_KEYSTORE_LOCATION": f"{CATALOG_KAFKA_PATH}/broker.pem",
+        "KAFKA_AUTHORIZER_CLASS_NAME": "org.apache.kafka.metadata.authorizer.StandardAuthorizer",
+        "KAFKA_SUPER_USERS": "User:broker;User:catalog_admin",
+        "KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND": "false",
+        "KAFKA_AUTO_CREATE_TOPICS_ENABLE": "false",
+    }.items()):
+        raise ValueError("expected private Kafka listeners and default-deny ACLs")
+    if any(entities.get(key) != value for key, value in {
+        "KAFKA_BOOTSTRAP_SERVERS": "kafka:9094",
+        "KAFKA_CATALOG_ACTIVITY_TOPIC": "catalog.activity.v1",
+        "KAFKA_TLS_ENABLED": "true",
+        "KAFKA_TLS_CA_FILE": f"{CATALOG_KAFKA_PATH}/ca.pem",
+        "KAFKA_TLS_SERVER_NAME": "kafka",
+        "KAFKA_SASL_MECHANISM": "PLAIN",
+        "KAFKA_SASL_USERNAME": "entities",
+    }.items()) or any(envs[peer].get("KAFKA_CATALOG_ACTIVITY_TOPIC") != "catalog.activity.v1"
+                      for peer in ("kafka-topics", "feed")):
+        raise ValueError("Entities needs verified Kafka TLS and the shared catalog topic")
+    for key, peers in CATALOG_KAFKA_CREDENTIALS.items():
+        value = broker[key]
+        if not isinstance(value, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", value) or value in used_secrets:
+            raise ValueError("Kafka catalog credentials must be distinct 64-character hex passwords")
+        recipients = {(name, var) for name, env in envs.items() for var, secret in env.items() if secret == value}
+        if recipients != {("kafka", key), *peers}:
+            raise ValueError("Kafka catalog credential is missing or shared with an unexpected service")
+        used_secrets.add(value)
+
+
+def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None, catalog_kafka_tls=None):
     project = PROJECTS[target]
     services = model["services"]
     expected = APP_IMAGES if target == "app" else RUNNER_IMAGES
@@ -478,6 +564,12 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
         allowed_mounts["content"] = {(content_tls / name, f"{CONTENT_TLS_PATH}/{name}")
                                      for name in ("server.pem", "server-key.pem")}
         allowed_mounts["api-gateway"] = {(content_tls / "server-ca.pem", f"{CONTENT_TLS_PATH}/server-ca.pem")}
+    if catalog_kafka_tls is not None:
+        ca = (catalog_kafka_tls / "ca.pem", f"{CATALOG_KAFKA_PATH}/ca.pem")
+        topic_scripts = (ROOT / "scripts/kafka", "/opt/overmind/kafka")
+        allowed_mounts["kafka"] = {topic_scripts, (catalog_kafka_tls / "broker.pem", f"{CATALOG_KAFKA_PATH}/broker.pem")}
+        allowed_mounts["kafka-topics"].add(ca)
+        allowed_mounts["entities"] = {ca}
     for name, service in services.items():
         if service["image"] != images[expected[name]] or service["platform"] != "linux/amd64":
             raise ValueError(f"{name}: image does not match the release")
@@ -556,20 +648,23 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
     check_service_tokens(services, used_secrets)
     check_content_connection(services, content_tls is not None, used_secrets)
     check_material_activity(services)
+    check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets)
 
 
-def compose_args(target, env_file, content_tls=None):
+def compose_args(target, env_file, content_tls=None, catalog_kafka_tls=None):
     args = ["docker", "compose", "--project-directory", str(ROOT)]
     if target == "app":
         args.extend(("--env-file", str(env_file), "-f", "docker-compose.yml", "-f", "deploy/compose.production.yml"))
         if content_tls is not None:
             args.extend(("-f", "deploy/compose.content-tls.yml"))
+        if catalog_kafka_tls is not None:
+            args.extend(("-f", "deploy/compose.catalog-kafka-tls.yml"))
     else:
         args.extend(("-f", "deploy/compose.runner.yml"))
     return args
 
 
-def compose_env(images, migration=None, runner_tls=None, content_tls=None):
+def compose_env(images, migration=None, runner_tls=None, content_tls=None, catalog_kafka_tls=None):
     environment = {
         key: value for key, value in os.environ.items()
         if key.upper().startswith("DOCKER_") or key.upper() in (
@@ -587,6 +682,8 @@ def compose_env(images, migration=None, runner_tls=None, content_tls=None):
         environment["RELEASE_RUNNER_TLS_DIR"] = str(runner_tls)
     if content_tls is not None:
         environment["RELEASE_CONTENT_TLS_DIR"] = str(content_tls)
+    if catalog_kafka_tls is not None:
+        environment["RELEASE_CATALOG_KAFKA_TLS_DIR"] = str(catalog_kafka_tls)
     return environment
 
 
@@ -622,11 +719,12 @@ def main():
     parser.add_argument("--sandbox-migration", type=Path)
     parser.add_argument("--runner-tls-dir", type=Path)
     parser.add_argument("--content-tls-dir", type=Path)
+    parser.add_argument("--catalog-kafka-tls-dir", type=Path)
     args = parser.parse_args()
     app_files = (args.env_file, args.sandbox_migration, args.runner_tls_dir)
     if args.target == "app" and not all(app_files):
         parser.error("app requires --env-file, --sandbox-migration and --runner-tls-dir")
-    if args.target == "runner" and (any(app_files) or args.content_tls_dir is not None):
+    if args.target == "runner" and (any(app_files) or args.content_tls_dir is not None or args.catalog_kafka_tls_dir is not None):
         parser.error("runner does not accept application files")
 
     try:
@@ -636,6 +734,7 @@ def main():
         migration = None
         runner_tls = None
         content_tls = None
+        catalog_kafka_tls = None
         env_file = None
         if args.target == "app":
             env_file = (check_private_env(args.env_file) if args.action == "up"
@@ -649,9 +748,15 @@ def main():
                     raise ValueError("Content TLS directory must not be a symlink")
                 content_tls = args.content_tls_dir.resolve(strict=True)
                 check_content_tls_files(content_tls, production=args.action == "up")
-        environment = compose_env(images, migration, runner_tls, content_tls)
-        compose = compose_args(args.target, env_file, content_tls)
-        check_model(check_compose(compose, environment), args.target, images, migration, runner_tls, content_tls)
+            if args.catalog_kafka_tls_dir is not None:
+                if args.catalog_kafka_tls_dir.is_symlink():
+                    raise ValueError("Kafka TLS directory must not be a symlink")
+                catalog_kafka_tls = args.catalog_kafka_tls_dir.resolve(strict=True)
+                check_catalog_kafka_files(catalog_kafka_tls, production=args.action == "up")
+        environment = compose_env(images, migration, runner_tls, content_tls, catalog_kafka_tls)
+        compose = compose_args(args.target, env_file, content_tls, catalog_kafka_tls)
+        check_model(check_compose(compose, environment), args.target, images, migration, runner_tls, content_tls,
+                    catalog_kafka_tls)
         if args.action == "up":
             check_host(args.target, environment)
             subprocess.run([*compose, "up", "-d", "--no-build"], check=True, cwd=ROOT, env=environment)

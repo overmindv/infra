@@ -116,6 +116,8 @@ lint: release-test sandbox-compose-test release-scan-test content-compose-test m
 	@sh -n tests/kafka.sh
 	@sh -n scripts/kafka/topics.sh
 	@sh -n tests/kafka-acl-live.sh
+	@sh -n scripts/kafka/catalog-tls.sh
+	@sh -n tests/catalog-kafka-live.sh
 	@sh tests/kafka-topics-plan.sh
 
 .PHONY: release-test sandbox-compose-test release-scan-test content-compose-test media-compose-test

@@ -1,0 +1,68 @@
+services:
+  kafka:
+    entrypoint: ["/bin/sh", "/opt/overmind/kafka/catalog-tls.sh", "broker"]
+    environment:
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:SASL_PLAINTEXT,REPLICA:SASL_PLAINTEXT,INTERNAL:PLAINTEXT,SECURE:SASL_SSL
+      KAFKA_LISTENERS: CONTROLLER://127.0.0.1:9093,REPLICA://127.0.0.1:9095,INTERNAL://:9092,SECURE://:9094
+      KAFKA_ADVERTISED_LISTENERS: REPLICA://127.0.0.1:9095,INTERNAL://kafka:9092,SECURE://kafka:9094
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@127.0.0.1:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: REPLICA
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_CONTROLLER_PROTOCOL: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      KAFKA_SSL_KEYSTORE_TYPE: PEM
+      KAFKA_SSL_KEYSTORE_LOCATION: /run/kafka/broker.pem
+      KAFKA_LISTENER_NAME_SECURE_SSL_CLIENT_AUTH: none
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_SUPER_USERS: User:broker;User:catalog_admin
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      OVM_KAFKA_CATALOG_BROKER_PASSWORD: ${OVM_KAFKA_CATALOG_BROKER_PASSWORD:?set Kafka broker password}
+      OVM_KAFKA_CATALOG_ADMIN_PASSWORD: ${OVM_KAFKA_CATALOG_ADMIN_PASSWORD:?set Kafka provisioning password}
+      OVM_KAFKA_CATALOG_ENTITIES_PASSWORD: ${OVM_KAFKA_CATALOG_ENTITIES_PASSWORD:?set Kafka Entities password}
+    volumes:
+      - type: bind
+        source: ./scripts/kafka
+        target: /opt/overmind/kafka
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/broker.pem
+        target: /run/kafka/broker.pem
+        read_only: true
+        bind:
+          create_host_path: false
+  kafka-topics:
+    entrypoint: ["/bin/sh", "/opt/overmind/kafka/catalog-tls.sh"]
+    command: ["provision"]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777,nosuid,nodev,noexec"]
+    environment:
+      OVM_KAFKA_CATALOG_ADMIN_PASSWORD: ${OVM_KAFKA_CATALOG_ADMIN_PASSWORD:?set Kafka provisioning password}
+    volumes:
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/ca.pem
+        target: /run/kafka/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+  entities:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9094
+      KAFKA_CATALOG_ACTIVITY_TOPIC: catalog.activity.v1
+      KAFKA_TLS_ENABLED: "true"
+      KAFKA_TLS_CA_FILE: /run/kafka/ca.pem
+      KAFKA_TLS_SERVER_NAME: kafka
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_SASL_USERNAME: entities
+      KAFKA_SASL_PASSWORD: ${OVM_KAFKA_CATALOG_ENTITIES_PASSWORD:?set Kafka Entities password}
+    volumes:
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/ca.pem
+        target: /run/kafka/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully

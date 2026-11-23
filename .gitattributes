@@ -1,3 +1,4 @@
 /scripts/kafka/*.sh text eol=lf
 /tests/kafka-acl-live.sh text eol=lf
+/tests/catalog-kafka-live.sh text eol=lf
 /tests/kafka-topics-plan.sh text eol=lf
