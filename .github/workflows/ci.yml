@@ -27,6 +27,14 @@ jobs:
       - name: Check catalog Kafka TLS and legacy client access
         run: sh tests/catalog-kafka-live.sh
 
+  sandbox-kafka:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Sandbox Kafka SCRAM rollout and rollback
+        run: sh tests/catalog-kafka-live.sh sandbox
+
   # E2E-CI отключён
   # e2e:
   #   permissions:

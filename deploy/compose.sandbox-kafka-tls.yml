@@ -1,0 +1,43 @@
+services:
+  kafka:
+    environment:
+      KAFKA_LISTENER_NAME_SECURE_SASL_ENABLED_MECHANISMS: PLAIN,SCRAM-SHA-256
+      KAFKA_LISTENER_NAME_SECURE_SCRAM___SHA___256_SASL_JAAS_CONFIG: org.apache.kafka.common.security.scram.ScramLoginModule required;
+  kafka-topics:
+    group_add: ["10001"]
+    environment:
+      OVM_KAFKA_SANDBOX_TLS: "true"
+    volumes:
+      - type: bind
+        source: ${RELEASE_SANDBOX_KAFKA_DIR:?Sandbox Kafka credentials directory required}/password
+        target: /run/kafka/worker/password
+        read_only: true
+        bind:
+          create_host_path: false
+  sandbox:
+    environment:
+      SANDBOX_KAFKA_BROKERS: kafka:9094
+      SANDBOX_KAFKA_SECURITY_PROTOCOL: SASL_SSL
+      SANDBOX_KAFKA_TLS_CA_FILE: /run/kafka/ca.pem
+      SANDBOX_KAFKA_SASL_MECHANISM: SCRAM-SHA-256
+      SANDBOX_KAFKA_SASL_USERNAME_FILE: /run/kafka/worker/username
+      SANDBOX_KAFKA_SASL_PASSWORD_FILE: /run/kafka/worker/password
+    volumes:
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/ca.pem
+        target: /run/kafka/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RELEASE_SANDBOX_KAFKA_DIR:?Sandbox Kafka credentials directory required}/username
+        target: /run/kafka/worker/username
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${RELEASE_SANDBOX_KAFKA_DIR:?Sandbox Kafka credentials directory required}/password
+        target: /run/kafka/worker/password
+        read_only: true
+        bind:
+          create_host_path: false

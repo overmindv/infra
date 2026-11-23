@@ -30,6 +30,8 @@ services:
     image: alpine:3
   feed:
     image: alpine:3
+  sandbox:
+    image: alpine:3
 networks:
   default:
     internal: true

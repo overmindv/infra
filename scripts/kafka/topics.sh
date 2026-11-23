@@ -20,6 +20,12 @@ case "$mode:$#" in
 esac
 legacy() { case "$mode" in catalog-rollout|catalog-rollout-feed|catalog-rollback-feed) return 0 ;; *) return 1 ;; esac; }
 authenticated() { [ "$mode" = secure ] || legacy; }
+sandbox_mode=${OVM_KAFKA_SANDBOX_TLS:-false}
+case "$sandbox_mode" in
+    false) ;;
+    true|rollback) legacy || die 'Sandbox TLS requires catalog rollout mode' ;;
+    *) die 'invalid Sandbox TLS mode' ;;
+esac
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -183,13 +189,16 @@ acl() {
         --resource-pattern-type literal "$@" >/dev/null
 }
 
-feed_legacy_acl() {
-    case "$mode" in
-        catalog-rollout-feed) set -- --add "$@" ;;
-        catalog-rollback-feed) set -- --remove --force "$@" ;;
+legacy_acl() {
+    transition=$1
+    operation=$2
+    shift 2
+    case "$transition" in
+        true) set -- --add "$@" ;;
+        rollback) set -- --remove --force "$@" ;;
         *) return 0 ;;
     esac
-    kafka kafka-acls "$@" --deny-principal User:ANONYMOUS --deny-host '*' --operation Read \
+    kafka kafka-acls "$@" --deny-principal User:ANONYMOUS --deny-host '*' --operation "$operation" \
         --resource-pattern-type literal >/dev/null
 }
 
@@ -199,27 +208,41 @@ if legacy; then
         --resource-pattern-type literal --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
         --topic learning.goal.v1 >/dev/null
     # Materials are still shared with the legacy Recommendations consumer.
-    feed_legacy_acl --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
+    feed_mode=false
+    case "$mode" in
+        catalog-rollout-feed) feed_mode=true ;;
+        catalog-rollback-feed) feed_mode=rollback ;;
+    esac
+    legacy_acl "$feed_mode" Read --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
         --topic "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}"
-    feed_legacy_acl --group "$feed_group"
+    legacy_acl "$feed_mode" Read --group "$feed_group"
+    legacy_acl "$sandbox_mode" Read --topic "${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}" \
+        --topic "${KAFKA_RETRY_TOPIC:-code-execution.retry.v1}"
+    legacy_acl "$sandbox_mode" Read --group "$sandbox_group"
+    legacy_acl "$sandbox_mode" Write --topic "${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}" \
+        --topic "${KAFKA_RETRY_TOPIC:-code-execution.retry.v1}" --topic "${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}" \
+        --topic "${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}"
 fi
 
 # Combine grants that have the same principal and operation.
 grants() {
     legacy_reads=0
     if legacy; then legacy_reads=1; fi
-    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" -v legacy="$legacy_reads" '
+    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" \
+        -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
         $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
-        legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" {
+        legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" && (sandbox_mode != "true" || $3 != "sandbox") {
             print "Write", "ANONYMOUS", "--topic", $1
         }
-        legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) {
+        legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) &&
+            (sandbox_mode != "true" || $4 != "sandbox") {
             print "Read", "ANONYMOUS", "--topic", $1
         }
-        legacy && $5 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed") {
+        legacy && $5 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed") &&
+            (sandbox_mode != "true" || $4 != "sandbox") {
             print "Read", "ANONYMOUS", "--group", $5
         }
     ' | sort -u | awk '
