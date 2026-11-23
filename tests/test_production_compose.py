@@ -97,6 +97,10 @@ class ProductionComposeTest(unittest.TestCase):
         cls.content_tls.mkdir()
         for name in deploy.CONTENT_TLS_FILES:
             (cls.content_tls / name).write_bytes(b"unused-fixture\n")
+        cls.catalog_tls = root / "catalog-kafka-tls"
+        cls.catalog_tls.mkdir()
+        for name in deploy.CATALOG_KAFKA_FILES:
+            (cls.catalog_tls / name).write_bytes(b"unused-fixture\n")
         cls.migration = root / "001_init_runs.sql"
         sql = b"SELECT 1;\n"
         cls.migration.write_bytes(sql)
@@ -110,6 +114,7 @@ class ProductionComposeTest(unittest.TestCase):
         fixture.write_text("\n".join([
             *passwords,
             *(f"{name}={index + 100:064x}" for index, name in enumerate(deploy.SERVICE_TOKENS)),
+            *(f"{name}={index + 800:064x}" for index, name in enumerate(deploy.CATALOG_KAFKA_CREDENTIALS)),
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
@@ -154,6 +159,10 @@ class ProductionComposeTest(unittest.TestCase):
         env.update({MODERATION_TOKEN: f"{902:064x}", "CONTENT_ACTIVITY_ENABLED": "true"})
         cls.moderation_model = deploy.check_compose(deploy.compose_args("app", fixture, cls.content_tls), env)
         cls.moderation_without_tls = deploy.check_compose(deploy.compose_args("app", fixture), env)
+        env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, catalog_kafka_tls=cls.catalog_tls)
+        cls.catalog_model = deploy.check_compose(
+            deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls), env
+        )
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -187,6 +196,29 @@ class ProductionComposeTest(unittest.TestCase):
         self.assertTrue(recommendations["networks"].keys() & entities["networks"].keys())
         self.assertFalse(recommendations.get("ports"))
         self.assertFalse(entities.get("ports"))
+
+    def test_catalog_kafka_tls_is_opt_in_and_confines_credentials(self):
+        deploy.check_catalog_kafka_files(self.catalog_tls)
+        self.assertNotIn("KAFKA_TLS_ENABLED", self.model["app"]["services"]["entities"]["environment"])
+        deploy.check_model(self.catalog_model, "app", self.images["app"], self.migration, self.runner_tls,
+                           catalog_kafka_tls=self.catalog_tls)
+        for peer in ("tasks", "feed", "sandbox", "recommendations"):
+            self.assertEqual(self.catalog_model["services"][peer], self.model["app"]["services"][peer])
+
+    def test_catalog_kafka_tls_rejects_insecure_or_misrouted_configuration(self):
+        for service, key, value in (
+            ("entities", "KAFKA_TLS_ENABLED", "false"),
+            ("entities", "KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+            ("kafka", "KAFKA_SUPER_USERS", "User:ANONYMOUS"),
+            ("feed", "KAFKA_CATALOG_ACTIVITY_TOPIC", "other"),
+            ("sandbox", "OVM_KAFKA_CATALOG_BROKER_PASSWORD", "unexpected"),
+            ("kafka", "OVM_KAFKA_CATALOG_ADMIN_PASSWORD", 'unsafe"'),
+        ):
+            with self.subTest(service=service, key=key), self.assertRaisesRegex(ValueError, "Kafka|Entities"):
+                model = copy.deepcopy(self.catalog_model)
+                model["services"][service]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   catalog_kafka_tls=self.catalog_tls)
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]

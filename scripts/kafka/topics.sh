@@ -12,12 +12,13 @@ bootstrap=${2:-kafka:9092}
 admin_config=${3:-}
 case "$mode:$#" in
     plan:0|plan:1|local:1|local:2) ;;
-    secure:3)
+    secure:3|catalog-rollout:3)
         [ -n "$2" ] || die 'bootstrap servers are required'
         [ -f "$admin_config" ] && [ -r "$admin_config" ] || die 'admin properties file is not readable'
         ;;
-    *) die 'usage: topics.sh plan | local [bootstrap] | secure bootstrap admin.properties' ;;
+    *) die 'usage: topics.sh plan | local [bootstrap] | secure|catalog-rollout bootstrap admin.properties' ;;
 esac
+authenticated() { [ "$mode" = secure ] || [ "$mode" = catalog-rollout ]; }
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -108,7 +109,7 @@ printf '%s\n' "$rows" | awk -v expected="$expected" '
 kafka() {
     command=$1
     shift
-    if [ "$mode" = secure ]; then
+    if authenticated; then
         "/opt/kafka/bin/$command.sh" --bootstrap-server "$bootstrap" --command-config "$admin_config" "$@"
     else
         "/opt/kafka/bin/$command.sh" --bootstrap-server "$bootstrap" "$@"
@@ -121,7 +122,7 @@ if [ "$mode" = plan ]; then
     exit 0
 fi
 
-if [ "$mode" = secure ]; then
+if authenticated; then
     kafka kafka-acls --list >/dev/null || die 'broker authorizer is required'
 fi
 
@@ -137,7 +138,7 @@ done <<EOF
 $rows
 EOF
 
-[ "$mode" = secure ] || exit 0
+authenticated || exit 0
 
 # Do not change existing topic settings during a rollout.
 description=$(kafka kafka-topics --describe)
@@ -181,13 +182,25 @@ acl() {
         --resource-pattern-type literal "$@" >/dev/null
 }
 
+if [ "$mode" = catalog-rollout ]; then
+    # Keep stale ACLs from opening writes on protected topics.
+    kafka kafka-acls --add --deny-principal User:ANONYMOUS --operation Write \
+        --resource-pattern-type literal --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
+        --topic learning.goal.v1 >/dev/null
+fi
+
 # Combine grants that have the same principal and operation.
 grants() {
-    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" '
+    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
         $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
+        mode == "catalog-rollout" && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" {
+            print "Write", "ANONYMOUS", "--topic", $1
+        }
+        mode == "catalog-rollout" && $4 != "-" { print "Read", "ANONYMOUS", "--topic", $1 }
+        mode == "catalog-rollout" && $5 != "-" { print "Read", "ANONYMOUS", "--group", $5 }
     ' | sort -u | awk '
         { key = $1 " " $2; resources[key] = resources[key] " " $3 " " $4 }
         END { for (key in resources) print key resources[key] }
