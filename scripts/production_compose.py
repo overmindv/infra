@@ -94,6 +94,7 @@ CATALOG_KAFKA_CREDENTIALS = {
     "OVM_KAFKA_CATALOG_ENTITIES_PASSWORD": (("entities", "KAFKA_SASL_PASSWORD"),),
 }
 FEED_KAFKA_CREDENTIAL = "OVM_KAFKA_FEED_PASSWORD"
+CONTENT_KAFKA_CREDENTIAL = "OVM_KAFKA_CONTENT_PASSWORD"
 SANDBOX_KAFKA_PATH = f"{CATALOG_KAFKA_PATH}/worker"
 SANDBOX_KAFKA_FILES = ("username", "password")
 SANDBOX_KAFKA_SECURITY = {
@@ -521,7 +522,7 @@ def verified_kafka_client(environment, username):
     }.items())
 
 
-def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None):
+def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, content_kafka=None):
     envs = {name: service.get("environment", {}) for name, service in services.items()}
     broker = envs["kafka"]
     entities = envs["entities"]
@@ -529,17 +530,19 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None):
     credentials = CATALOG_KAFKA_CREDENTIALS.copy()
     if feed_tls:
         credentials[FEED_KAFKA_CREDENTIAL] = (("feed", "KAFKA_SASL_PASSWORD"),)
+    if content_kafka == "tls":
+        credentials[CONTENT_KAFKA_CREDENTIAL] = (("content", "KAFKA_SASL_PASSWORD"),)
     expected_keys = {(name, var) for key, peers in credentials.items() for name, var in (("kafka", key), *peers)}
     actual_keys = {
         (name, key) for name, env in envs.items() for key in env
-        if (key in CATALOG_KAFKA_CREDENTIALS or key == FEED_KAFKA_CREDENTIAL
-            or (name in {"entities", "feed"} and key == "KAFKA_SASL_PASSWORD"))
+        if (key in CATALOG_KAFKA_CREDENTIALS or key in {FEED_KAFKA_CREDENTIAL, CONTENT_KAFKA_CREDENTIAL}
+            or (name in {"entities", "feed", "content"} and key == "KAFKA_SASL_PASSWORD"))
     }
-    rollout_flags = {(name, env["OVM_KAFKA_FEED_TLS"]) for name, env in envs.items()
-                     if "OVM_KAFKA_FEED_TLS" in env}
-    feed_mode = {"tls": "true", "rollback": "rollback"}.get(feed_kafka)
-    if actual_keys != (expected_keys if enabled else set()) or rollout_flags != (
-            {("kafka-topics", feed_mode)} if feed_mode else set()):
+    flags = {"OVM_KAFKA_FEED_TLS": feed_kafka, "OVM_KAFKA_CONTENT_TLS": content_kafka}
+    mode_value = {"tls": "true", "rollback": "rollback"}
+    expected_flags = {("kafka-topics", key, mode_value[mode]) for key, mode in flags.items() if mode}
+    rollout_flags = {(name, key, env[key]) for name, env in envs.items() for key in flags if key in env}
+    if actual_keys != (expected_keys if enabled else set()) or rollout_flags != expected_flags:
         raise ValueError("Kafka catalog credentials require the TLS overlay and must stay in their services")
     if not enabled:
         return
@@ -581,6 +584,18 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None):
                     and feed["KAFKA_CONTENT_MATERIAL_TOPIC"] != plan.get("KAFKA_CONTENT_MATERIAL_TOPIC"))
                 or not must_wait_for(services["feed"], "kafka-topics")):
             raise ValueError("Feed needs verified Kafka TLS and the consumer group and topics from the Kafka plan")
+    content = envs["content"]
+    if content_kafka == "tls":
+        plan = envs["kafka-topics"]
+        topic_keys = ("KAFKA_CONTENT_MATERIAL_TOPIC", "KAFKA_CONTENT_LEARNING_TOPIC", "KAFKA_CONTENT_CONTRIBUTION_TOPIC")
+        if (not verified_kafka_client(content, "content")
+                or "KAFKA_TLS_CERT_FILE" in content or "KAFKA_TLS_KEY_FILE" in content
+                or content.get("KAFKA_TOPIC") != plan.get("KAFKA_CONTENT_TOPIC")
+                or any(content.get(key) != plan.get(key) for key in topic_keys)
+                or not must_wait_for(services["content"], "kafka-topics")):
+            raise ValueError("Content needs verified Kafka TLS and the publisher topics from the Kafka plan")
+    elif content_kafka == "rollback" and content.get("KAFKA_BOOTSTRAP_SERVERS") != "kafka:9092":
+        raise ValueError("Content Kafka rollback requires the legacy listener")
     for key, peers in credentials.items():
         value = broker[key]
         if not isinstance(value, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", value) or value in used_secrets:
@@ -588,6 +603,11 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None):
         recipients = {(name, var) for name, env in envs.items() for var, secret in env.items() if secret == value}
         if recipients != {("kafka", key), *peers}:
             raise ValueError("Kafka catalog credential is missing or shared with an unexpected service")
+        if key == CONTENT_KAFKA_CREDENTIAL and any(
+            value in other for env in envs.values() for other in env.values()
+            if isinstance(other, str) and other != value
+        ):
+            raise ValueError("Content Kafka password must not be embedded in other settings")
         used_secrets.add(value)
 
 
@@ -626,11 +646,13 @@ def check_sandbox_kafka(services, directory, rollback, used_secrets):
 
 
 def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None, catalog_kafka_tls=None,
-                feed_kafka=None, sandbox_kafka_dir=None, sandbox_kafka_rollback=False):
+                feed_kafka=None, sandbox_kafka_dir=None, sandbox_kafka_rollback=False, content_kafka=None):
     if feed_kafka is not None and catalog_kafka_tls is None:
         raise ValueError("Feed Kafka TLS requires the catalog Kafka TLS overlay")
     if (sandbox_kafka_dir is not None or sandbox_kafka_rollback) and catalog_kafka_tls is None:
         raise ValueError("Sandbox Kafka requires the catalog Kafka TLS overlay")
+    if content_kafka is not None and catalog_kafka_tls is None:
+        raise ValueError("Content Kafka requires the catalog Kafka TLS overlay")
     project = PROJECTS[target]
     services = model["services"]
     expected = APP_IMAGES if target == "app" else RUNNER_IMAGES
@@ -668,6 +690,8 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
         allowed_mounts["entities"] = {ca}
         if feed_kafka == "tls":
             allowed_mounts["feed"] = {ca}
+        if content_kafka == "tls":
+            allowed_mounts.setdefault("content", set()).add(ca)
         if sandbox_kafka_dir is not None:
             allowed_mounts["sandbox"].add(ca)
             allowed_mounts["sandbox"].update((sandbox_kafka_dir / name, f"{SANDBOX_KAFKA_PATH}/{name}")
@@ -751,12 +775,12 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
     check_service_tokens(services, used_secrets)
     check_content_connection(services, content_tls is not None, used_secrets)
     check_material_activity(services)
-    check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets, feed_kafka)
+    check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets, feed_kafka, content_kafka)
     check_sandbox_kafka(services, sandbox_kafka_dir, sandbox_kafka_rollback, used_secrets)
 
 
 def compose_args(target, env_file, content_tls=None, catalog_kafka_tls=None, feed_kafka=None,
-                 sandbox_kafka_dir=None, sandbox_kafka_rollback=False):
+                 sandbox_kafka_dir=None, sandbox_kafka_rollback=False, content_kafka=None):
     args = ["docker", "compose", "--project-directory", str(ROOT)]
     if target == "app":
         args.extend(("--env-file", str(env_file), "-f", "docker-compose.yml", "-f", "deploy/compose.production.yml"))
@@ -772,6 +796,8 @@ def compose_args(target, env_file, content_tls=None, catalog_kafka_tls=None, fee
             args.extend(("-f", "deploy/compose.sandbox-kafka-tls.yml"))
         if sandbox_kafka_rollback:
             args.extend(("-f", "deploy/compose.sandbox-kafka-rollback.yml"))
+        if content_kafka:
+            args.extend(("-f", f"deploy/compose.content-kafka-{content_kafka}.yml"))
     else:
         args.extend(("-f", "deploy/compose.runner.yml"))
     return args
@@ -842,6 +868,9 @@ def main():
     sandbox_mode = parser.add_mutually_exclusive_group()
     sandbox_mode.add_argument("--sandbox-kafka-credentials-dir", type=Path)
     sandbox_mode.add_argument("--sandbox-kafka-rollback", action="store_true")
+    content_mode = parser.add_mutually_exclusive_group()
+    content_mode.add_argument("--content-kafka-tls", dest="content_kafka", action="store_const", const="tls")
+    content_mode.add_argument("--content-kafka-rollback", dest="content_kafka", action="store_const", const="rollback")
     args = parser.parse_args()
     app_files = (args.env_file, args.sandbox_migration, args.runner_tls_dir)
     if args.target == "app" and not all(app_files):
@@ -850,6 +879,8 @@ def main():
         parser.error("runner does not accept application files")
     if args.feed_kafka and (args.target != "app" or args.catalog_kafka_tls_dir is None):
         parser.error("Feed Kafka flags require app and --catalog-kafka-tls-dir")
+    if args.content_kafka and (args.target != "app" or args.catalog_kafka_tls_dir is None):
+        parser.error("Content Kafka flags require app and --catalog-kafka-tls-dir")
     if ((args.sandbox_kafka_credentials_dir is not None or args.sandbox_kafka_rollback)
             and (args.target != "app" or args.catalog_kafka_tls_dir is None)):
         parser.error("Sandbox Kafka flags require app and --catalog-kafka-tls-dir")
@@ -888,9 +919,10 @@ def main():
                 check_sandbox_kafka_files(sandbox_kafka_dir, production=args.action == "up")
         environment = compose_env(images, migration, runner_tls, content_tls, catalog_kafka_tls, sandbox_kafka_dir)
         compose = compose_args(args.target, env_file, content_tls, catalog_kafka_tls, args.feed_kafka,
-                               sandbox_kafka_dir, args.sandbox_kafka_rollback)
+                               sandbox_kafka_dir, args.sandbox_kafka_rollback, args.content_kafka)
         check_model(check_compose(compose, environment), args.target, images, migration, runner_tls, content_tls,
-                    catalog_kafka_tls, args.feed_kafka, sandbox_kafka_dir, args.sandbox_kafka_rollback)
+                    catalog_kafka_tls, args.feed_kafka, sandbox_kafka_dir, args.sandbox_kafka_rollback,
+                    args.content_kafka)
         if args.action == "up":
             check_host(args.target, environment)
             subprocess.run([*compose, "up", "-d", "--no-build"], check=True, cwd=ROOT, env=environment)

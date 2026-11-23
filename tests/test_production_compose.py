@@ -121,6 +121,7 @@ class ProductionComposeTest(unittest.TestCase):
             *(f"{name}={index + 100:064x}" for index, name in enumerate(deploy.SERVICE_TOKENS)),
             *(f"{name}={index + 800:064x}" for index, name in enumerate(deploy.CATALOG_KAFKA_CREDENTIALS)),
             f"{deploy.FEED_KAFKA_CREDENTIAL}={850:064x}",
+            f"{deploy.CONTENT_KAFKA_CREDENTIAL}={852:064x}",
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
@@ -187,6 +188,14 @@ class ProductionComposeTest(unittest.TestCase):
             deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls, feed_kafka="tls",
                                 sandbox_kafka_rollback=True), env
         )
+        cls.content_kafka = {}
+        for mode in ("tls", "rollback"):
+            cls.content_kafka[mode] = deploy.check_compose(
+                deploy.compose_args("app", fixture, content_tls=cls.content_tls, catalog_kafka_tls=cls.catalog_tls,
+                                    feed_kafka="tls", content_kafka=mode),
+                deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, content_tls=cls.content_tls,
+                                   catalog_kafka_tls=cls.catalog_tls),
+            )
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -303,6 +312,33 @@ class ProductionComposeTest(unittest.TestCase):
                 deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
                                    catalog_kafka_tls=self.catalog_tls, feed_kafka="tls",
                                    sandbox_kafka_dir=self.sandbox_kafka_dir)
+
+    def test_content_kafka_does_not_change_other_clients(self):
+        for mode, model in self.content_kafka.items():
+            with self.subTest(mode=mode):
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   self.content_tls, self.catalog_tls, feed_kafka="tls", content_kafka=mode)
+                for peer in ("feed", "recommendations", "entities", "tasks", "sandbox", "content-migrate"):
+                    self.assertEqual(model["services"][peer], self.feed_kafka["tls"]["services"][peer])
+        before = self.content_kafka["rollback"]["services"]["content"]
+        self.assertEqual(before["environment"]["KAFKA_BOOTSTRAP_SERVERS"], "kafka:9092")
+        self.assertNotIn("KAFKA_SASL_PASSWORD", before["environment"])
+        self.assertEqual(len(self.content_kafka["tls"]["services"]["content"]["volumes"]), len(before["volumes"]) + 1)
+
+    def test_content_kafka_rejects_wrong_topics_and_shared_secret(self):
+        for peer, key, value in (
+            ("content", "KAFKA_TOPIC", "another.content.topic"),
+            ("content", "KAFKA_TLS_SERVER_NAME", "other-broker"),
+            ("content", "KAFKA_TLS_ENABLED", "false"),
+            ("content-migrate", deploy.CONTENT_KAFKA_CREDENTIAL, f"{852:064x}"),
+            ("sandbox", "UNEXPECTED_URL", f"https://user:{852:064x}@example.invalid"),
+            ("kafka-topics", "OVM_KAFKA_CONTENT_TLS", "rollback"),
+        ):
+            with self.subTest(peer=peer, key=key), self.assertRaisesRegex(ValueError, "Kafka"):
+                model = copy.deepcopy(self.content_kafka["tls"])
+                model["services"][peer]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   self.content_tls, self.catalog_tls, feed_kafka="tls", content_kafka="tls")
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]

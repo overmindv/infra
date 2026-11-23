@@ -35,6 +35,14 @@ jobs:
       - name: Check Sandbox Kafka SCRAM rollout and rollback
         run: sh tests/catalog-kafka-live.sh sandbox
 
+  content-kafka:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Content Kafka TLS, reader access and rollback
+        run: sh tests/catalog-kafka-live.sh content
+
   # E2E-CI отключён
   # e2e:
   #   permissions:

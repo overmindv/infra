@@ -26,6 +26,12 @@ case "$sandbox_mode" in
     true|rollback) legacy || die 'Sandbox TLS requires catalog rollout mode' ;;
     *) die 'invalid Sandbox TLS mode' ;;
 esac
+content_mode=${OVM_KAFKA_CONTENT_TLS:-false}
+case "$content_mode" in
+    false) ;;
+    true|rollback) legacy || die 'Content TLS requires catalog rollout mode' ;;
+    *) die 'invalid Content TLS mode' ;;
+esac
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -222,6 +228,9 @@ if legacy; then
     legacy_acl "$sandbox_mode" Write --topic "${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}" \
         --topic "${KAFKA_RETRY_TOPIC:-code-execution.retry.v1}" --topic "${KAFKA_EVENTS_TOPIC:-code-execution.events.v1}" \
         --topic "${KAFKA_DEADLETTER_TOPIC:-code-execution.deadletter.v1}"
+    legacy_acl "$content_mode" Write --topic "${KAFKA_CONTENT_TOPIC:-content.content-item-events}" \
+        --topic "$material_topic" --topic "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" \
+        --topic "${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}"
 fi
 
 # Combine grants that have the same principal and operation.
@@ -229,12 +238,13 @@ grants() {
     legacy_reads=0
     if legacy; then legacy_reads=1; fi
     printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" \
-        -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" '
+        -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" -v content_mode="$content_mode" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
         $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
-        legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" && (sandbox_mode != "true" || $3 != "sandbox") {
+        legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" &&
+            (sandbox_mode != "true" || $3 != "sandbox") && (content_mode != "true" || $3 != "content") {
             print "Write", "ANONYMOUS", "--topic", $1
         }
         legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) &&
