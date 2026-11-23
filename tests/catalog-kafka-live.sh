@@ -4,6 +4,8 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 work=$(mktemp -d)
 project="catalogkafka-$(basename "$work" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
+host_owner="$(id -u):$(id -g)"
+export CATALOG_KAFKA_TEST_IMAGE=apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
 base() {
     docker compose --env-file /dev/null --project-directory "$root" -p "$project" \
         -f "$root/tests/catalog-kafka-compose.yml" "$@"
@@ -11,8 +13,15 @@ base() {
 secure() {
     base -f "$root/deploy/compose.catalog-kafka-tls.yml" "$@"
 }
+fixture_chown() {
+    docker run --rm --network none --user 0:0 --entrypoint chown \
+        --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
+}
 cleanup() {
     base down >/dev/null 2>&1 || :
+    if [ "$host_owner" != 1000:1000 ] && [ -d "$work/data" ]; then
+        fixture_chown -R "$host_owner" /fixture/data >/dev/null
+    fi
     rm -rf -- "$work"
 }
 trap cleanup EXIT
@@ -43,6 +52,9 @@ cat "$work/broker.key" "$work/broker-cert.pem" "$work/kafka-ca.pem" > "$RELEASE_
 cp "$work/kafka-ca.pem" "$RELEASE_CATALOG_KAFKA_TLS_DIR/ca.pem"
 chmod 640 "$RELEASE_CATALOG_KAFKA_TLS_DIR/broker.pem"
 chmod 644 "$RELEASE_CATALOG_KAFKA_TLS_DIR/ca.pem"
+if [ "$host_owner" != 1000:1000 ]; then
+    fixture_chown 1000:1000 /fixture/data /fixture/pki/broker.pem
+fi
 
 wait_kafka() {
     step=0

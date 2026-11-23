@@ -1,6 +1,6 @@
 services:
   kafka:
-    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    image: ${CATALOG_KAFKA_TEST_IMAGE:?fixture image required}
     environment:
       CLUSTER_ID: 4L6g3nShT-eMCtK--X86sw
       KAFKA_NODE_ID: "1"
@@ -21,7 +21,7 @@ services:
     volumes:
       - "${CATALOG_KAFKA_TEST_DATA:?fixture data required}:/var/lib/kafka/data"
   kafka-topics:
-    image: apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
+    image: ${CATALOG_KAFKA_TEST_IMAGE:?fixture image required}
     entrypoint: ["/bin/sh", "/opt/overmind/kafka/topics.sh"]
     command: ["local", "kafka:9092"]
     volumes:
