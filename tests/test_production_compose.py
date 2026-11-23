@@ -101,6 +101,11 @@ class ProductionComposeTest(unittest.TestCase):
         cls.catalog_tls.mkdir()
         for name in deploy.CATALOG_KAFKA_FILES:
             (cls.catalog_tls / name).write_bytes(b"unused-fixture\n")
+        cls.sandbox_kafka_dir = root / "sandbox-kafka"
+        cls.sandbox_kafka_dir.mkdir()
+        (cls.sandbox_kafka_dir / "username").write_bytes(b"sandbox\n")
+        cls.sandbox_kafka_password = f"{851:064x}"
+        (cls.sandbox_kafka_dir / "password").write_bytes(cls.sandbox_kafka_password.encode("ascii") + b"\n")
         cls.migration = root / "001_init_runs.sql"
         sql = b"SELECT 1;\n"
         cls.migration.write_bytes(sql)
@@ -169,6 +174,19 @@ class ProductionComposeTest(unittest.TestCase):
             cls.feed_kafka[mode] = deploy.check_compose(
                 deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls, feed_kafka=mode), env
             )
+        cls.sandbox_kafka = {}
+        for feed in (None, "tls"):
+            env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, catalog_kafka_tls=cls.catalog_tls,
+                                     sandbox_kafka_dir=cls.sandbox_kafka_dir)
+            cls.sandbox_kafka[feed] = deploy.check_compose(
+                deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls, feed_kafka=feed,
+                                    sandbox_kafka_dir=cls.sandbox_kafka_dir), env
+            )
+        env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, catalog_kafka_tls=cls.catalog_tls)
+        cls.sandbox_rollback = deploy.check_compose(
+            deploy.compose_args("app", fixture, catalog_kafka_tls=cls.catalog_tls, feed_kafka="tls",
+                                sandbox_kafka_rollback=True), env
+        )
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -254,6 +272,37 @@ class ProductionComposeTest(unittest.TestCase):
                 model["services"][service]["environment"][key] = value
                 deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
                                    catalog_kafka_tls=self.catalog_tls, feed_kafka="tls")
+
+    def test_sandbox_scram_and_rollback_are_independent_of_feed(self):
+        deploy.check_sandbox_kafka_files(self.sandbox_kafka_dir)
+        for feed, model in self.sandbox_kafka.items():
+            with self.subTest(feed=feed):
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   catalog_kafka_tls=self.catalog_tls, feed_kafka=feed,
+                                   sandbox_kafka_dir=self.sandbox_kafka_dir)
+                expected = self.feed_kafka["tls"] if feed else self.catalog_model
+                for peer in ("feed", "tasks", "entities"):
+                    self.assertEqual(model["services"][peer], expected["services"][peer])
+        deploy.check_model(self.sandbox_rollback, "app", self.images["app"], self.migration, self.runner_tls,
+                           catalog_kafka_tls=self.catalog_tls, feed_kafka="tls", sandbox_kafka_rollback=True)
+        self.assertEqual(self.sandbox_rollback["services"]["sandbox"], self.feed_kafka["tls"]["services"]["sandbox"])
+
+    def test_sandbox_scram_rejects_invalid_roles_and_credential_scope(self):
+        for service, key, value in (
+            ("sandbox", "SANDBOX_KAFKA_GROUP_ID", "new-group"),
+            ("sandbox", "SANDBOX_KAFKA_SASL_MECHANISM", "PLAIN"),
+            ("sandbox", "SANDBOX_KAFKA_TOPIC_RESULTS", "other"),
+            ("kafka", "KAFKA_LISTENER_NAME_SECURE_SASL_ENABLED_MECHANISMS", "PLAIN"),
+            ("kafka-topics", "OVM_KAFKA_SANDBOX_TLS", "rollback"),
+            ("tasks", "EXTERNAL_PASSWORD", self.sandbox_kafka_password),
+            ("tasks", "EXTERNAL_URL", f"https://user:{self.sandbox_kafka_password}@example.invalid"),
+        ):
+            with self.subTest(service=service, key=key), self.assertRaisesRegex(ValueError, "Sandbox Kafka"):
+                model = copy.deepcopy(self.sandbox_kafka["tls"])
+                model["services"][service]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   catalog_kafka_tls=self.catalog_tls, feed_kafka="tls",
+                                   sandbox_kafka_dir=self.sandbox_kafka_dir)
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]

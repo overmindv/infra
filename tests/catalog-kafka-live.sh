@@ -19,6 +19,12 @@ feed_tls() {
 feed_rollback() {
     secure -f "$root/deploy/compose.feed-kafka-rollback.yml" "$@"
 }
+sandbox_tls() {
+    feed_tls -f "$root/deploy/compose.sandbox-kafka-tls.yml" "$@"
+}
+sandbox_rollback() {
+    feed_tls -f "$root/deploy/compose.sandbox-kafka-rollback.yml" "$@"
+}
 fixture_chown() {
     docker run --rm --network none --user 0:0 --entrypoint chown \
         --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
@@ -109,12 +115,82 @@ save_client() {
     base exec -T kafka sh -c 'umask 077; cat > "/tmp/$1"' sh "$1"
 }
 properties() {
+    mechanism=${5:-PLAIN}
+    login=plain.PlainLoginModule
+    if [ "$mechanism" = SCRAM-SHA-256 ]; then login=scram.ScramLoginModule; fi
     {
-        printf '%s\n' 'security.protocol=SASL_SSL' 'sasl.mechanism=PLAIN' 'ssl.truststore.type=PEM'
+        printf '%s\n' 'security.protocol=SASL_SSL' "sasl.mechanism=$mechanism" 'ssl.truststore.type=PEM'
         printf 'ssl.truststore.location=/tmp/%s\n' "$3"
-        printf 'sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required username="%s" password="%s";\n' "$1" "$2"
+        printf 'sasl.jaas.config=org.apache.kafka.common.security.%s required username="%s" password="%s";\n' "$login" "$1" "$2"
     } | save_client "$4"
 }
+
+sandbox_rollout() {
+    requests=code-execution.requests.v1
+    results=code-execution.results.v1
+    retry=code-execution.retry.v1
+    worker_group=sandbox-code-execution-v1
+    tasks_group=tasks-code-results-v1
+    export RELEASE_SANDBOX_KAFKA_DIR="$work/worker"
+    mkdir -m 755 "$RELEASE_SANDBOX_KAFKA_DIR"
+    worker_password=$(openssl rand -hex 32)
+    printf '%s\n' sandbox > "$RELEASE_SANDBOX_KAFKA_DIR/username"
+    printf '%s\n' "$worker_password" > "$RELEASE_SANDBOX_KAFKA_DIR/password"
+    chmod 640 "$RELEASE_SANDBOX_KAFKA_DIR/username" "$RELEASE_SANDBOX_KAFKA_DIR/password"
+    fixture_chown 10001:10001 /fixture/worker/username /fixture/worker/password
+
+    feed_tls up -d kafka
+    wait_kafka
+    feed_tls run --rm -T --no-deps kafka-topics
+    printf '%s\n' 'job|consumed-before-tls' | produce kafka:9092 "$requests"
+    [ "$(read_one kafka:9092 "$requests" "$worker_group")" = consumed-before-tls ]
+    printf '%s\n' 'job|queued-before-tls' | produce kafka:9092 "$requests"
+
+    sandbox_tls up -d kafka
+    wait_kafka
+    sandbox_tls run --rm -T --no-deps kafka-topics
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties sandbox "$worker_password" ca.pem sandbox.properties SCRAM-SHA-256
+    properties sandbox "$(openssl rand -hex 32)" ca.pem wrong-scram.properties SCRAM-SHA-256
+    [ "$(read_one kafka:9094 "$requests" "$worker_group" --command-config /tmp/sandbox.properties)" = queued-before-tls ]
+    printf '%s\n' 'job|result-after-tls' | produce kafka:9094 "$results" --command-config /tmp/sandbox.properties
+    [ "$(read_one kafka:9092 "$results" "$tasks_group")" = result-after-tls ]
+    printf '%s\n' 'job|retry-after-tls' | produce kafka:9094 "$retry" --command-config /tmp/sandbox.properties
+    [ "$(read_one kafka:9094 "$retry" "$worker_group" --command-config /tmp/sandbox.properties)" = retry-after-tls ]
+    expect_denied SaslAuthenticationException read_one kafka:9094 "$requests" "$worker_group" \
+        --command-config /tmp/wrong-scram.properties
+    expect_denied GroupAuthorizationException read_one kafka:9092 "$results" "$worker_group"
+    expect_denied TopicAuthorizationException read_one kafka:9092 "$requests" "$tasks_group"
+    printf '%s\n' 'job|legacy-cannot-write-result' | expect_denied TopicAuthorizationException \
+        produce kafka:9092 "$results" --command-property enable.idempotence=false
+    printf '%s\n' 'job|worker-cannot-write-request' | expect_denied TopicAuthorizationException \
+        produce kafka:9094 "$requests" --command-config /tmp/sandbox.properties --command-property enable.idempotence=false
+    printf '%s\n' 'job|queued-for-rollback' | produce kafka:9092 "$requests"
+    properties entities "$OVM_KAFKA_CATALOG_ENTITIES_PASSWORD" ca.pem entities.properties
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    printf '%s\n' 'catalog|feed-still-uses-tls' | produce kafka:9094 catalog.activity.v1 --command-config /tmp/entities.properties
+    [ "$(read_one kafka:9094 catalog.activity.v1 feed-v1 --command-config /tmp/feed.properties)" = feed-still-uses-tls ]
+
+    sandbox_rollback up -d kafka
+    wait_kafka
+    sandbox_rollback run --rm -T --no-deps kafka-topics
+    [ "$(read_one kafka:9092 "$requests" "$worker_group")" = queued-for-rollback ]
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties catalog_admin "$OVM_KAFKA_CATALOG_ADMIN_PASSWORD" ca.pem admin.properties
+    credentials=$(base exec -T kafka /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9094 \
+        --command-config /tmp/admin.properties --describe --entity-type users --entity-name sandbox)
+    if printf '%s\n' "$credentials" | grep -Fq 'SCRAM-SHA-256='; then
+        printf '%s\n' 'Sandbox rollback left a SCRAM credential' >&2
+        exit 1
+    fi
+    printf '%s\n' 'Sandbox SCRAM, task requests, results and offsets survived rollout and rollback'
+}
+
+case "${1:-}" in
+    sandbox) sandbox_rollout; exit ;;
+    '') ;;
+    *) exit 2 ;;
+esac
 
 base up -d kafka
 wait_kafka

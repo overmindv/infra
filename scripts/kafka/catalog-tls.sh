@@ -14,6 +14,35 @@ bad_password() {
     exit 1
 }
 
+sandbox_credentials() {
+    case "${OVM_KAFKA_SANDBOX_TLS:-false}" in
+        true)
+            worker=$(cat /run/kafka/worker/password)
+            password "$worker" && [ "$worker" != "$admin" ] || bad_password
+            printf 'SCRAM-SHA-256=iterations=8192,password=%s\n' "$worker" > "$scram"
+            unset worker
+            # Kafka can include the credential property in its error output.
+            if ! sandbox_scram --alter --add-config-file "$scram" >/dev/null 2>&1; then
+                printf '%s\n' 'Failed to provision Sandbox Kafka SCRAM credential' >&2
+                exit 1
+            fi
+            ;;
+        rollback)
+            description=$(sandbox_scram --describe)
+            if printf '%s\n' "$description" | grep -Fq 'SCRAM-SHA-256='; then
+                sandbox_scram --alter --delete-config SCRAM-SHA-256 >/dev/null
+            fi
+            ;;
+        false) ;;
+        *) printf '%s\n' 'Invalid Kafka Sandbox TLS mode' >&2; exit 1 ;;
+    esac
+}
+
+sandbox_scram() {
+    /opt/kafka/bin/kafka-configs.sh --bootstrap-server kafka:9094 --command-config "$client" \
+        --entity-type users --entity-name sandbox "$@"
+}
+
 plain='org.apache.kafka.common.security.plain.PlainLoginModule required'
 admin=${OVM_KAFKA_CATALOG_ADMIN_PASSWORD:-}
 password "$admin" || bad_password
@@ -41,14 +70,17 @@ case "${1:-}" in
         ;;
     provision)
         umask 077
-        client=$(mktemp)
-        trap 'rm -f -- "$client"' EXIT
+        work=$(mktemp -d)
+        client=$work/client.properties
+        scram=$work/scram.properties
+        trap 'rm -f -- "$client" "$scram"; rmdir "$work"' EXIT
         trap 'exit 1' HUP INT TERM
         {
             printf '%s\n' 'security.protocol=SASL_SSL' 'sasl.mechanism=PLAIN' \
                 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/kafka/ca.pem'
             printf 'sasl.jaas.config=%s username="catalog_admin" password="%s";\n' "$plain" "$admin"
         } > "$client"
+        sandbox_credentials
         case "${OVM_KAFKA_FEED_TLS:-false}" in
             true) mode=catalog-rollout-feed ;;
             rollback) mode=catalog-rollback-feed ;;
