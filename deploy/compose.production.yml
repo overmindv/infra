@@ -352,6 +352,8 @@ services:
     environment:
       DATABASE_URL: postgres://overmind_app:${ENTITIES_POSTGRES_PASSWORD:?production database password required}@entities-postgres:5432/entities?sslmode=disable
       ENV: production
+      ENTITIES_MEDIA_URL: "${MEDIA_ENTITIES_PRODUCTION_TOKEN:+http://media:8080}"
+      ENTITIES_MEDIA_TOKEN: "${MEDIA_ENTITIES_PRODUCTION_TOKEN:-}"
     depends_on:
       entities-grants:
         condition: service_completed_successfully
@@ -537,6 +539,7 @@ services:
       MEDIA_GATEWAY_TOKEN: ${MEDIA_GATEWAY_TOKEN:?production service token required}
       MEDIA_USERS_TOKEN: ${MEDIA_USERS_TOKEN:?production service token required}
       MEDIA_CONTENT_TOKEN: !reset null
+      MEDIA_ENTITIES_TOKEN: "${MEDIA_ENTITIES_PRODUCTION_TOKEN:-}"
       MEDIA_S3_PUBLIC_ENDPOINT: ${MEDIA_S3_PUBLIC_ENDPOINT:?public HTTPS S3 endpoint required}
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?public HTTPS media URL required}
       MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?limited S3 access key required}

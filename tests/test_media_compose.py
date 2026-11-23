@@ -8,10 +8,11 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def render_compose(binding_token=""):
+def render_compose(binding_token="", logo_token=""):
     env = os.environ.copy()
     env.pop("MEDIA_ALLOW_UNSCANNED_LOCAL", None)
     env["MEDIA_CONTENT_TOKEN"] = binding_token
+    env["MEDIA_ENTITIES_TOKEN"] = logo_token
     rendered = subprocess.run(
         ["docker", "compose", "--env-file", ".env.example", "--profile", "antivirus",
          "config", "--format", "json"],
@@ -21,6 +22,20 @@ def render_compose(binding_token=""):
 
 
 class MediaComposeTest(unittest.TestCase):
+    def test_catalog_logo_token_stays_between_entities_and_media(self):
+        token = "catalog-logo-fixture-" * 2
+        services = render_compose(logo_token=token)["services"]
+        self.assertEqual(services["entities"]["environment"]["ENTITIES_MEDIA_URL"], "http://media:8080")
+        self.assertEqual(services["entities"]["environment"]["ENTITIES_MEDIA_TOKEN"], token)
+        self.assertEqual(services["media"]["environment"]["MEDIA_ENTITIES_TOKEN"], token)
+        for name, service in services.items():
+            if name not in ("entities", "media"):
+                self.assertNotIn(token, service.get("environment", {}).values())
+        disabled = render_compose()["services"]
+        self.assertFalse(disabled["entities"]["environment"].get("ENTITIES_MEDIA_URL"))
+        self.assertFalse(disabled["entities"]["environment"].get("ENTITIES_MEDIA_TOKEN"))
+        self.assertFalse(disabled["media"]["environment"].get("MEDIA_ENTITIES_TOKEN"))
+
     def test_content_media_token_is_local_and_scoped(self):
         token = "content-binding-fixture-" * 2
         services = render_compose(token)["services"]
