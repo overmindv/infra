@@ -12,13 +12,14 @@ bootstrap=${2:-kafka:9092}
 admin_config=${3:-}
 case "$mode:$#" in
     plan:0|plan:1|local:1|local:2) ;;
-    secure:3|catalog-rollout:3)
+    secure:3|catalog-rollout:3|catalog-rollout-feed:3|catalog-rollback-feed:3)
         [ -n "$2" ] || die 'bootstrap servers are required'
         [ -f "$admin_config" ] && [ -r "$admin_config" ] || die 'admin properties file is not readable'
         ;;
-    *) die 'usage: topics.sh plan | local [bootstrap] | secure|catalog-rollout bootstrap admin.properties' ;;
+    *) die 'usage: topics.sh plan | local [bootstrap] | <secure mode> bootstrap admin.properties' ;;
 esac
-authenticated() { [ "$mode" = secure ] || [ "$mode" = catalog-rollout ]; }
+legacy() { case "$mode" in catalog-rollout|catalog-rollout-feed|catalog-rollback-feed) return 0 ;; *) return 1 ;; esac; }
+authenticated() { [ "$mode" = secure ] || legacy; }
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -182,25 +183,45 @@ acl() {
         --resource-pattern-type literal "$@" >/dev/null
 }
 
-if [ "$mode" = catalog-rollout ]; then
+feed_legacy_acl() {
+    case "$mode" in
+        catalog-rollout-feed) set -- --add "$@" ;;
+        catalog-rollback-feed) set -- --remove --force "$@" ;;
+        *) return 0 ;;
+    esac
+    kafka kafka-acls "$@" --deny-principal User:ANONYMOUS --deny-host '*' --operation Read \
+        --resource-pattern-type literal >/dev/null
+}
+
+if legacy; then
     # Keep stale ACLs from opening writes on protected topics.
     kafka kafka-acls --add --deny-principal User:ANONYMOUS --operation Write \
         --resource-pattern-type literal --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
         --topic learning.goal.v1 >/dev/null
+    # Materials are still shared with the legacy Recommendations consumer.
+    feed_legacy_acl --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
+        --topic "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}"
+    feed_legacy_acl --group "$feed_group"
 fi
 
 # Combine grants that have the same principal and operation.
 grants() {
-    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" '
+    legacy_reads=0
+    if legacy; then legacy_reads=1; fi
+    printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" -v legacy="$legacy_reads" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
         $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
-        mode == "catalog-rollout" && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" {
+        legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" {
             print "Write", "ANONYMOUS", "--topic", $1
         }
-        mode == "catalog-rollout" && $4 != "-" { print "Read", "ANONYMOUS", "--topic", $1 }
-        mode == "catalog-rollout" && $5 != "-" { print "Read", "ANONYMOUS", "--group", $5 }
+        legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) {
+            print "Read", "ANONYMOUS", "--topic", $1
+        }
+        legacy && $5 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed") {
+            print "Read", "ANONYMOUS", "--group", $5
+        }
     ' | sort -u | awk '
         { key = $1 " " $2; resources[key] = resources[key] " " $3 " " $4 }
         END { for (key in resources) print key resources[key] }

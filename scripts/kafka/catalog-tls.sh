@@ -27,8 +27,16 @@ case "${1:-}" in
             [ "$admin" != "$entities" ] || bad_password
         export KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG="$plain username=\"broker\" password=\"$broker\" user_broker=\"$broker\";"
         export KAFKA_LISTENER_NAME_REPLICA_PLAIN_SASL_JAAS_CONFIG="$KAFKA_LISTENER_NAME_CONTROLLER_PLAIN_SASL_JAAS_CONFIG"
-        export KAFKA_LISTENER_NAME_SECURE_PLAIN_SASL_JAAS_CONFIG="$plain user_catalog_admin=\"$admin\" user_entities=\"$entities\";"
+        users="user_catalog_admin=\"$admin\" user_entities=\"$entities\""
+        if [ "${OVM_KAFKA_FEED_PASSWORD+x}" ]; then
+            feed=$OVM_KAFKA_FEED_PASSWORD
+            password "$feed" && [ "$feed" != "$broker" ] && [ "$feed" != "$admin" ] &&
+                [ "$feed" != "$entities" ] || bad_password
+            users="$users user_feed=\"$feed\""
+        fi
+        export KAFKA_LISTENER_NAME_SECURE_PLAIN_SASL_JAAS_CONFIG="$plain $users;"
         unset OVM_KAFKA_CATALOG_BROKER_PASSWORD OVM_KAFKA_CATALOG_ADMIN_PASSWORD OVM_KAFKA_CATALOG_ENTITIES_PASSWORD
+        unset OVM_KAFKA_FEED_PASSWORD
         exec /__cacert_entrypoint.sh /etc/kafka/docker/run
         ;;
     provision)
@@ -41,7 +49,13 @@ case "${1:-}" in
                 'ssl.truststore.type=PEM' 'ssl.truststore.location=/run/kafka/ca.pem'
             printf 'sasl.jaas.config=%s username="catalog_admin" password="%s";\n' "$plain" "$admin"
         } > "$client"
-        sh /opt/overmind/kafka/topics.sh catalog-rollout kafka:9094 "$client"
+        case "${OVM_KAFKA_FEED_TLS:-false}" in
+            true) mode=catalog-rollout-feed ;;
+            rollback) mode=catalog-rollback-feed ;;
+            false) mode=catalog-rollout ;;
+            *) printf '%s\n' 'Invalid Kafka Feed TLS mode' >&2; exit 1 ;;
+        esac
+        sh /opt/overmind/kafka/topics.sh "$mode" kafka:9094 "$client"
         ;;
     *) exit 2 ;;
 esac

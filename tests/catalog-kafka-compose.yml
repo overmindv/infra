@@ -28,6 +28,8 @@ services:
       - ./scripts/kafka:/opt/overmind/kafka:ro
   entities:
     image: alpine:3
+  feed:
+    image: alpine:3
 networks:
   default:
     internal: true
