@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from release_manifest import fingerprint, make_plan, read_json, write_json
+from release_manifest import fingerprint, read_json, verify_source_plan, write_json
 from release_scan_policy import read_exceptions, release_images, report_findings
 from release_scan_results import go_findings, image_findings, npm_findings, source_secrets
 from release_sources import archive, remote_source
@@ -136,9 +136,7 @@ def timed_scan(scanner, target, scans, findings, func, *args):
 
 def scan_release(manifest, workspace, images, output, exceptions_path=EXCEPTIONS):
     plan = manifest["plan"]
-    if plan != make_plan(workspace, plan["sources"], plan["pins"],
-                         plan["registry"], plan["release"]):
-        raise ValueError("release plan does not match the source trees")
+    verify_source_plan(workspace, plan)
     timestamp = datetime.now(timezone.utc)
     entries = read_json(exceptions_path)
     exceptions = read_exceptions(entries, set(plan["sources"]), timestamp.date())

@@ -160,11 +160,15 @@ def inspect(image, labels):
     return image_id
 
 
-def build(workspace, plan):
+def verify_source_plan(workspace, plan):
     validate_plan(plan)
     if plan != make_plan(workspace, plan["sources"], plan["pins"],
                          plan["registry"], plan["release"], with_postgres="postgres" in plan["images"]):
         raise ValueError("plan does not match the pinned source trees")
+
+
+def build(workspace, plan):
+    verify_source_plan(workspace, plan)
     plan_id = fingerprint(plan)
     built = {}
     for name in sorted({image["source"] for image in plan["images"].values()}):
