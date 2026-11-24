@@ -2,10 +2,11 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+CATALOG_KAFKA_TEST_IMAGE=$(sh "$root/tests/kafka-test-image.sh" "${KAFKA_TEST_VERSION:-4.3.2}")
+export CATALOG_KAFKA_TEST_IMAGE
 work=$(mktemp -d)
 project="catalogkafka-$(basename "$work" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
 host_owner="$(id -u):$(id -g)"
-export CATALOG_KAFKA_TEST_IMAGE=apache/kafka:4.3.1@sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837
 base() {
     docker compose --env-file /dev/null --project-directory "$root" -p "$project" \
         -f "$root/tests/catalog-kafka-compose.yml" "$@"
