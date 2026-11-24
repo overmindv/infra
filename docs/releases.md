@@ -26,6 +26,15 @@
 `tests/kafka-test-image.sh` и запустите `sh tests/kafka-release-perf.sh`.
 Замер использует отдельный брокер без внешней сети и рабочих томов.
 
+Для следующего приватного кандидата добавьте `--with-postgres` к команде `plan`
+и укажите `--registry ghcr.io/overmindv/rc`. Возьмите SHA Infra с
+`deploy/postgres/Dockerfile`. Тогда Postgres собирается из этого коммита,
+а не берется из `postgres:17-alpine`. Можно убрать пин `postgres:17-alpine`,
+если он не нужен как база другого образа. Без флага манифест сохраняет прежний upstream.
+Публикация записывает `ghcr.io/overmindv/rc/postgres@sha256:...` в `images`.
+Настройте чтение этого приватного пакета для Actions из `overmindv/docs`.
+Проверка кандидата запускает Postgres smoke и Trivy на одном digest.
+
 Временные файлы можно держать в `.local/`. Команды выполняются из `infra`:
 
 ```sh
