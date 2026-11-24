@@ -148,6 +148,22 @@ class ResultsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             image_findings("sandbox", {})
 
+    def test_image_report_keeps_versions_for_each_affected_package_instance(self):
+        fixture = container_fixture()
+        detected = fixture["Results"][0]["Vulnerabilities"]
+        detected[0].update(InstalledVersion="1:2.3-r0", FixedVersion="2.4-r1, 2.5-r0, 2.4-r1")
+        detected.append({**detected[0], "InstalledVersion": "1:2.3-r1", "FixedVersion": ""})
+        detected.append(detected[0].copy())
+        detected.append({**detected[0], "InstalledVersion": "file:///etc/invalid"})
+        finding, = report_findings(image_findings("sandbox", fixture), {}, {}, {
+            "sandbox": f"repo@{DIGEST}",
+        })
+        self.assertEqual(finding["decision"], "blocked")
+        self.assertEqual(finding["versions"], [
+            {"installed": "1:2.3-r0", "fixed": ["2.4-r1", "2.5-r0"]},
+            {"installed": "1:2.3-r1", "fixed": []},
+        ])
+
 
 class ScanReportTest(unittest.TestCase):
     def test_gates_the_whole_candidate_and_keeps_failed_scan_evidence(self):

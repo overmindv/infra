@@ -19,6 +19,7 @@ class Finding:
     subject: str
     severity: str
     blocking: bool
+    versions: tuple[str, tuple[str, ...]] | None = None
 
     @property
     def key(self):
@@ -82,19 +83,22 @@ def read_exceptions(entries, sources, today):
     return allowed
 
 
-def severity_finding(scanner, target, advisory, subject, severity):
+def severity_finding(scanner, target, advisory, subject, severity, *, versions=None):
     level = severity.upper()
     if level == "MODERATE":
         level = "MEDIUM"
     if level not in SEVERITIES:
         raise ValueError(f"{scanner}: invalid severity")
-    return Finding(scanner, target, advisory, subject, level, level in {"HIGH", "CRITICAL"})
+    return Finding(scanner, target, advisory, subject, level,
+                   level in {"HIGH", "CRITICAL"}, versions)
 
 
 def report_findings(findings, exceptions, sources, images):
-    distinct = {}
+    distinct, versions_by_key = {}, {}
     for finding in findings:
         previous = distinct.get(finding.key)
+        if finding.versions:
+            versions_by_key.setdefault(finding.key, set()).add(finding.versions)
         if previous is None or (
             finding.blocking, SEVERITIES.index(finding.severity)
         ) > (previous.blocking, SEVERITIES.index(previous.severity)):
@@ -108,6 +112,12 @@ def report_findings(findings, exceptions, sources, images):
         )
         exception = exceptions.get((*key, revision))
         item = asdict(finding)
+        item.pop("versions")
+        if key in versions_by_key:
+            item["versions"] = [
+                {"installed": installed, "fixed": list(fixed)}
+                for installed, fixed in sorted(versions_by_key[key])
+            ]
         if exception is not None:
             item["exception"] = exception
         item["decision"] = (

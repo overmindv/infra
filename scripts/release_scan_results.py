@@ -1,6 +1,23 @@
 import json
+import re
 
 from release_scan_policy import Finding, severity_finding
+
+
+VERSION = re.compile(r"v?[0-9][0-9A-Za-z.!+_~:-]{0,95}")
+
+
+def package_versions(item):
+    installed = item.get("InstalledVersion")
+    if not isinstance(installed, str) or not VERSION.fullmatch(installed):
+        return None
+    fixed = item.get("FixedVersion")
+    options = ()
+    if isinstance(fixed, str) and fixed and len(fixed) <= 512:
+        parts = tuple(part.strip() for part in fixed.split(","))
+        if all(VERSION.fullmatch(part) for part in parts):
+            options = tuple(sorted(set(parts)))
+    return installed, options
 
 
 def go_findings(target, output):
@@ -63,6 +80,7 @@ def image_findings(target, report):
         for item in result.get("Vulnerabilities") or []:
             findings.append(severity_finding(
                 "container", target, item["VulnerabilityID"], item["PkgName"], item["Severity"],
+                versions=package_versions(item),
             ))
         for item in result.get("Secrets") or []:
             findings.append(Finding(
