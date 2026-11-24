@@ -76,6 +76,32 @@ python3 scripts/release_scan.py scan --manifest .local/release.json \
 Коды выхода: `0` - проверка пройдена, `1` - есть блокирующие находки, `2` - проверка
 не завершилась или входные данные не прошли валидацию. Workflow не разворачивает релиз.
 
+## Проверить образ Postgres
+
+`deploy/postgres/Dockerfile` собирает отдельный образ Postgres 17.12 для `linux/amd64`.
+В нем обновлен `libxml2`, а штатный entrypoint сбрасывает права через `su-exec`
+вместо `gosu`. База образа и SHA-256 обоих Alpine-пакетов закреплены; APK проверяет
+подписи и устанавливает их без сети. Если зеркало удалит эту версию пакета, сборка
+остановится. Новый APK требует повторного скана и smoke-теста.
+
+```sh
+mkdir -p .local
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  --build-arg SOURCE_DATE_EPOCH=1795037540 --tag overmindv/postgres:17.12-check \
+  --metadata-file .local/postgres-build.json \
+  --output type=oci,dest=.local/postgres.tar,rewrite-timestamp=true deploy/postgres
+layout=$(mktemp -d .local/postgres-oci.XXXXXX)
+tar -xf .local/postgres.tar -C "$layout"
+trivy image --platform linux/amd64 --scanners vuln,secret --input "$layout"
+docker load --input .local/postgres.tar
+image=$(jq -er '."containerimage.digest"' .local/postgres-build.json)
+python3 tests/postgres_roles_smoke.py --image "$image" --benchmark
+```
+
+Для сравнения прогоните тот же smoke-тест на ссылке из `FROM`. Smoke создает пустую
+БД в отдельном контейнере без сети и постоянных томов. Сканы до и после сравнивайте
+на одной версии базы Trivy. Образ не подключен к `release.json` или Compose.
+
 Форматы инструментов: [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck),
 [npm audit](https://docs.npmjs.com/cli/commands/npm-audit/),
 [Trivy SBOM](https://trivy.dev/docs/latest/supply-chain/sbom/),
