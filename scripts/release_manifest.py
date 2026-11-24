@@ -19,6 +19,8 @@ from release_sources import (
 PLATFORM = "linux/amd64"
 RELEASE_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,47}")
 CANDIDATE_REGISTRY = "ghcr.io/overmindv/rc"
+KAFKA_PATCH_REF = "apache/kafka:4.3.2"
+KAFKA_PATCH_DIGEST = "sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7"
 
 
 def unique_keys(pairs):
@@ -62,9 +64,18 @@ def plan_inputs(sources, pins, registry, release):
         raise ValueError("expected a lowercase release name (1-48 characters)")
 
 
+def pinned_upstream(pins):
+    refs = UPSTREAM
+    if "kafka" in refs and refs["kafka"] not in pins and KAFKA_PATCH_REF in pins:
+        if pins[KAFKA_PATCH_REF] != KAFKA_PATCH_DIGEST:
+            raise ValueError(f"{KAFKA_PATCH_REF}: expected reviewed Kafka digest")
+        refs = {**refs, "kafka": KAFKA_PATCH_REF}
+    return {service: pinned_image(ref, pins) for service, ref in refs.items()}
+
+
 def make_plan(workspace, sources, pins, registry, release):
     plan_inputs(sources, pins, registry, release)
-    upstream = {service: pinned_image(ref, pins) for service, ref in UPSTREAM.items()}
+    upstream = pinned_upstream(pins)
     repositories = {name: (workspace / name).resolve() for name in sources}
     records = {}
     for name, repo in sorted(repositories.items()):
@@ -103,9 +114,7 @@ def validate_plan(plan):
         image = images[service]
         if (image["source"], image["dockerfile"], image.get("target")) != (name, path, target):
             raise ValueError(f"{service}: unexpected image source")
-    if plan["upstream"] != {
-        name: pinned_image(ref, plan["pins"]) for name, ref in UPSTREAM.items()
-    }:
+    if plan["upstream"] != pinned_upstream(plan["pins"]):
         raise ValueError("upstream images do not match the pins")
 
 

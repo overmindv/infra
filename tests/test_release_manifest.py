@@ -114,6 +114,26 @@ class ReleaseTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "missing or invalid digest for postgres"):
                 self.plan()
 
+    def test_kafka_patch_pin_preserves_legacy_plans(self):
+        original = "apache/kafka:4.3.1"
+        updated = release.KAFKA_PATCH_REF
+        patch_digest = release.KAFKA_PATCH_DIGEST
+        with patch.object(release, "UPSTREAM", {"kafka": original}):
+            old_pins = {BASE: DIGEST, original: DIGEST}
+            old = self.plan(old_pins)
+            release.validate_plan(old)
+            self.assertEqual(
+                self.plan({**old_pins, updated: patch_digest})["upstream"], old["upstream"]
+            )
+            patch_plan = self.plan({BASE: DIGEST, updated: patch_digest})
+            release.validate_plan(patch_plan)
+            self.assertEqual(patch_plan["upstream"], {"kafka": f"apache/kafka@{patch_digest}"})
+            patch_plan["upstream"] = old["upstream"]
+            with self.assertRaisesRegex(ValueError, "upstream images do not match"):
+                release.validate_plan(patch_plan)
+            with self.assertRaisesRegex(ValueError, "expected reviewed Kafka digest"):
+                self.plan({BASE: DIGEST, updated: PUSHED_DIGEST})
+
     def test_rejects_changed_plan_before_docker(self):
         plan = self.plan()
         plan["metadata"]["users"]["migrations"].clear()
