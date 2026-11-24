@@ -332,6 +332,37 @@ class ReleaseTest(unittest.TestCase):
         ], check=True)
 
 
+class KafkaFixtureImageTest(unittest.TestCase):
+    def test_validates_index_id_and_selected_platform_separately(self):
+        helper = Path(__file__).with_name("kafka-test-image.sh")
+        with tempfile.TemporaryDirectory() as directory:
+            docker = Path(directory) / "docker"
+            docker.write_bytes(b"""#!/bin/sh
+set -eu
+case "$*" in
+    'image inspect --format {{.Id}} '*) printf '%s\\n' "$FIXTURE_ID" ;;
+    'image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} {{.Config.User}} '*)
+        printf '%s\\n' "$FIXTURE_PLATFORM" ;;
+    *) exit 3 ;;
+esac
+""")
+            docker.chmod(0o700)
+            for image_id, platform, code in (
+                (DIGEST, "linux/amd64 appuser", 0),
+                (PUSHED_DIGEST, "linux/amd64 appuser", 2),
+                (DIGEST, "linux/arm64 appuser", 2),
+                (DIGEST, "linux/amd64 root", 2),
+            ):
+                with self.subTest(image_id=image_id, platform=platform):
+                    result = subprocess.run(
+                        ["sh", str(helper), DIGEST], capture_output=True, text=True,
+                        env={**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                             "FIXTURE_ID": image_id, "FIXTURE_PLATFORM": platform},
+                    )
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual(result.stdout.strip(), DIGEST if code == 0 else "")
+
+
 class DockerfileTest(unittest.TestCase):
     def test_preserves_stage_references_and_replaces_argument_base(self):
         spec = (

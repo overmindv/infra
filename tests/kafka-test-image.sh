@@ -13,9 +13,11 @@ case "${1:-4.3.2}" in
             printf '%s\n' 'Expected a full Kafka fixture image ID' >&2
             exit 2
         fi
-        actual=$(docker image inspect --platform linux/amd64 \
-            --format '{{.Id}} {{.Os}}/{{.Architecture}} {{.Config.User}}' "$1")
-        if [ "$actual" != "$1 linux/amd64 appuser" ]; then
+        # Docker returns the child manifest ID when a platform is selected.
+        actual=$(docker image inspect --format '{{.Id}}' "$1")
+        platform=$(docker image inspect --platform linux/amd64 \
+            --format '{{.Os}}/{{.Architecture}} {{.Config.User}}' "$1")
+        if [ "$actual" != "$1" ] || [ "$platform" != 'linux/amd64 appuser' ]; then
             printf '%s\n' 'Expected a local linux/amd64 Kafka image running as appuser' >&2
             exit 2
         fi
