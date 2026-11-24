@@ -21,7 +21,10 @@ RELEASE_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,47}")
 CANDIDATE_REGISTRY = "ghcr.io/overmindv/rc"
 KAFKA_PATCH_REF = "apache/kafka:4.3.2"
 KAFKA_PATCH_DIGEST = "sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7"
-POSTGRES_DOCKERFILE = ("infra", "deploy/postgres/Dockerfile")
+CANDIDATE_DOCKERFILES = {
+    "kafka": ("infra", "deploy/kafka/Dockerfile"),
+    "postgres": ("infra", "deploy/postgres/Dockerfile"),
+}
 
 
 def unique_keys(pairs):
@@ -65,28 +68,26 @@ def plan_inputs(sources, pins, registry, release):
         raise ValueError("expected a lowercase release name (1-48 characters)")
 
 
-def release_dockerfiles(registry, with_postgres):
-    if not with_postgres:
-        return DOCKERFILES
-    if registry != CANDIDATE_REGISTRY:
-        raise ValueError("the built Postgres image is only allowed in private candidates")
-    return {**DOCKERFILES, "postgres": POSTGRES_DOCKERFILE}
+def release_dockerfiles(registry, built_runtime):
+    if built_runtime and registry != CANDIDATE_REGISTRY:
+        raise ValueError("built runtime images are only allowed in private candidates")
+    return {**DOCKERFILES, **{name: CANDIDATE_DOCKERFILES[name] for name in built_runtime}}
 
 
-def pinned_upstream(pins, *, with_postgres=False):
-    refs = UPSTREAM
+def pinned_upstream(pins, built_runtime):
+    refs = {role: ref for role, ref in UPSTREAM.items() if role not in built_runtime}
     if "kafka" in refs and refs["kafka"] not in pins and KAFKA_PATCH_REF in pins:
         if pins[KAFKA_PATCH_REF] != KAFKA_PATCH_DIGEST:
             raise ValueError(f"{KAFKA_PATCH_REF}: expected reviewed Kafka digest")
         refs = {**refs, "kafka": KAFKA_PATCH_REF}
-    return {service: pinned_image(ref, pins) for service, ref in refs.items()
-            if service != "postgres" or not with_postgres}
+    return {service: pinned_image(ref, pins) for service, ref in refs.items()}
 
 
-def make_plan(workspace, sources, pins, registry, release, *, with_postgres=False):
+def make_plan(workspace, sources, pins, registry, release, *, with_postgres=False, with_kafka=False):
     plan_inputs(sources, pins, registry, release)
-    dockerfiles = release_dockerfiles(registry, with_postgres)
-    upstream = pinned_upstream(pins, with_postgres=with_postgres)
+    built_runtime = {name for name, enabled in (("postgres", with_postgres), ("kafka", with_kafka)) if enabled}
+    dockerfiles = release_dockerfiles(registry, built_runtime)
+    upstream = pinned_upstream(pins, built_runtime)
     repositories = {name: (workspace / name).resolve() for name in sources}
     records = {}
     for name, repo in sorted(repositories.items()):
@@ -116,8 +117,8 @@ def validate_plan(plan):
         raise ValueError("unsupported release plan")
     plan_inputs(plan["sources"], plan["pins"], plan["registry"], plan["release"])
     images = plan["images"]
-    with_postgres = "postgres" in images
-    dockerfiles = release_dockerfiles(plan["registry"], with_postgres)
+    built_runtime = CANDIDATE_DOCKERFILES.keys() & images.keys()
+    dockerfiles = release_dockerfiles(plan["registry"], built_runtime)
     staged = {service: (repo, path, target) for service, (repo, path, target)
               in STAGE_IMAGES.items() if service in images}
     if plan["platform"] != PLATFORM or images.keys() != dockerfiles.keys() | staged.keys():
@@ -127,7 +128,7 @@ def validate_plan(plan):
         image = images[service]
         if (image["source"], image["dockerfile"], image.get("target")) != (name, path, target):
             raise ValueError(f"{service}: unexpected image source")
-    if plan["upstream"] != pinned_upstream(plan["pins"], with_postgres=with_postgres):
+    if plan["upstream"] != pinned_upstream(plan["pins"], built_runtime):
         raise ValueError("upstream images do not match the pins")
 
 
@@ -163,7 +164,8 @@ def inspect(image, labels):
 def verify_source_plan(workspace, plan):
     validate_plan(plan)
     if plan != make_plan(workspace, plan["sources"], plan["pins"],
-                         plan["registry"], plan["release"], with_postgres="postgres" in plan["images"]):
+                         plan["registry"], plan["release"],
+                         with_postgres="postgres" in plan["images"], with_kafka="kafka" in plan["images"]):
         raise ValueError("plan does not match the pinned source trees")
 
 
@@ -246,6 +248,8 @@ def main():
             command.add_argument("--release", required=True)
             command.add_argument("--with-postgres", action="store_true",
                                  help="build Postgres from the pinned Infra commit for a private candidate")
+            command.add_argument("--with-kafka", action="store_true",
+                                 help="build Kafka from the pinned Infra commit for a private candidate")
         elif name == "build":
             command.add_argument("--plan", type=Path, required=True)
         else:
@@ -257,7 +261,7 @@ def main():
         if args.command == "plan":
             result = make_plan(args.workspace.resolve(), read_json(args.sources),
                                read_json(args.pins), args.registry, args.release,
-                               with_postgres=args.with_postgres)
+                               with_postgres=args.with_postgres, with_kafka=args.with_kafka)
         elif args.command == "build":
             result = build(args.workspace.resolve(), read_json(args.plan))
         else:
