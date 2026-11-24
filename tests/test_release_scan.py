@@ -180,7 +180,7 @@ class ScanReportTest(unittest.TestCase):
 
         with (
             tempfile.TemporaryDirectory() as work,
-            patch.object(scanner, "make_plan", return_value=manifest["plan"]),
+            patch("release_manifest.make_plan", return_value=manifest["plan"]),
             patch.object(scanner, "archive"),
             patch.object(scanner, "source_scan", return_value=[]),
             patch.object(scanner, "go_scan", return_value=[]),

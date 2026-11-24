@@ -6,11 +6,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import release_manifest as release
+import release_scan as scanner
 from release_scan_policy import release_images
 from release_sources import archive, git, pin_dockerfile
 
@@ -186,7 +187,17 @@ class ReleaseTest(unittest.TestCase):
                                  {"postgres": DIGEST, "users": DIGEST})
             self.assertEqual(len(calls), 1)
             refs = {name: f"{registry}/{name}@{PUSHED_DIGEST}" for name in plan["images"]}
-            self.assertEqual(release_images({"plan": plan, "images": refs}), refs)
+            manifest = {"plan": plan, "images": refs}
+            self.assertEqual(release_images(manifest), refs)
+            report = self.workspace / "scan"
+            with (
+                patch.object(scanner, "source_scan", return_value=[]),
+                patch.object(scanner, "go_scan", return_value=[]),
+                patch.object(scanner, "image_scan", return_value=[]) as scan_image,
+                patch("builtins.print"),
+            ):
+                self.assertEqual(scanner.scan_release(manifest, self.workspace, refs, report), 0)
+            scan_image.assert_any_call("postgres", refs["postgres"], release.PLATFORM, ANY, report)
             plan["upstream"] = legacy["upstream"]
             with self.assertRaisesRegex(ValueError, "upstream images do not match"):
                 release.validate_plan(plan)
