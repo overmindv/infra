@@ -228,6 +228,26 @@ class ProductionComposeTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "single private candidate"):
             deploy.image_env(manifest, "app")
 
+    def test_private_kafka_is_shared_by_the_broker_and_topics_job(self):
+        manifest = copy.deepcopy(self.release)
+        plan = manifest["plan"]
+        plan["registry"] = deploy.CANDIDATE_REGISTRY
+        ref = f"{deploy.CANDIDATE_REGISTRY}/kafka@sha256:" + "c" * 64
+        manifest["images"]["kafka"] = ref
+        with self.assertRaisesRegex(ValueError, "single private candidate"):
+            deploy.image_env(manifest, "app")
+        old = plan["upstream"].pop("kafka")
+        images = deploy.image_env(manifest, "app")
+        self.assertEqual(images["postgres"], plan["upstream"]["postgres"])
+        env = deploy.compose_env(images, self.migration, self.runner_tls)
+        model = deploy.check_compose(deploy.compose_args("app", self.app_env), env)
+        for name in ("kafka", "kafka-topics"):
+            self.assertEqual(model["services"][name]["image"], ref)
+            self.assertEqual(self.model["app"]["services"][name]["image"], old)
+        manifest["images"]["kafka"] = ref.replace("/rc/", "/")
+        with self.assertRaisesRegex(ValueError, "single private candidate"):
+            deploy.image_env(manifest, "app")
+
     def test_app_and_runner_are_separate(self):
         deploy.check_migration(self.release, self.migration)
         deploy.check_runner_tls_files(self.runner_tls)

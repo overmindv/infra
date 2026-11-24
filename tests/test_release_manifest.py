@@ -68,10 +68,10 @@ class ReleaseTest(unittest.TestCase):
         (self.repo / "source.txt").write_bytes(b"dirty\n")
         (self.repo / ".env").write_bytes(b"FIXTURE_ONLY=untracked\n")
 
-    def plan(self, pins=None, registry="example.invalid/overmindv", *, with_postgres=False):
+    def plan(self, pins=None, registry="example.invalid/overmindv", *, with_postgres=False, with_kafka=False):
         return release.make_plan(self.workspace, self.sources,
                                  {BASE: DIGEST} if pins is None else pins,
-                                 registry, "v1", with_postgres=with_postgres)
+                                 registry, "v1", with_postgres=with_postgres, with_kafka=with_kafka)
 
     def test_reads_only_committed_sources(self):
         plan = self.plan()
@@ -143,7 +143,7 @@ class ReleaseTest(unittest.TestCase):
             release.build(self.workspace, plan)
 
     def test_builds_optional_postgres_from_infra_only_for_a_private_candidate(self):
-        postgres, path = release.POSTGRES_DOCKERFILE
+        postgres, path = release.CANDIDATE_DOCKERFILES["postgres"]
         repo = self.workspace / postgres
         recipe = repo / path
         recipe.parent.mkdir(parents=True)
@@ -201,6 +201,38 @@ class ReleaseTest(unittest.TestCase):
             plan["upstream"] = legacy["upstream"]
             with self.assertRaisesRegex(ValueError, "upstream images do not match"):
                 release.validate_plan(plan)
+
+    def test_kafka_and_postgres_can_be_built_independently(self):
+        repo = self.workspace / "infra"
+        for name, image in (("kafka", "apache/kafka"), ("postgres", "postgres")):
+            recipe = repo / release.CANDIDATE_DOCKERFILES[name][1]
+            recipe.parent.mkdir(parents=True)
+            recipe.write_bytes(f"FROM {image}@{DIGEST}\n".encode())
+        git(repo, "add", "deploy")
+        git(repo, "commit", "-qm", "Built Kafka and Postgres fixtures")
+        sha = git(repo, "rev-parse", "HEAD").decode().strip()
+        git(repo, "update-ref", "refs/remotes/origin/main", sha)
+        self.sources["infra"] = sha
+        upstream = {"kafka": "apache/kafka:4.3.1", "postgres": "postgres:17-alpine"}
+        registry = release.CANDIDATE_REGISTRY
+        with patch.object(release, "UPSTREAM", upstream):
+            for selected in (set(), {"kafka"}, {"postgres"}, {"kafka", "postgres"}):
+                with self.subTest(selected=selected):
+                    pins = {BASE: DIGEST, **{ref: PUSHED_DIGEST for role, ref in upstream.items()
+                                             if role not in selected}}
+                    plan = self.plan(pins, registry, with_kafka="kafka" in selected,
+                                     with_postgres="postgres" in selected)
+                    release.verify_source_plan(self.workspace, plan)
+                    self.assertEqual(plan["upstream"].keys(), upstream.keys() - selected)
+                    self.assertEqual(plan["images"].keys(), self.catalog.keys() | selected)
+                    refs = {name: f"{registry}/{name}@{PUSHED_DIGEST}" for name in plan["images"]}
+                    self.assertEqual(release_images({"plan": plan, "images": refs}), {**plan["upstream"], **refs})
+                    if "kafka" in selected:
+                        plan["upstream"]["kafka"] = f"apache/kafka@{PUSHED_DIGEST}"
+                        with self.assertRaisesRegex(ValueError, "upstream images do not match"):
+                            release.validate_plan(plan)
+            with self.assertRaisesRegex(ValueError, "private candidates"):
+                self.plan(with_kafka=True, with_postgres=True)
 
     def test_candidate_labels_link_private_docs_and_keep_source_provenance(self):
         plan = self.plan(registry=release.CANDIDATE_REGISTRY)
@@ -298,6 +330,37 @@ class ReleaseTest(unittest.TestCase):
             image, "-ec", 'test "$(cat /payload/source.txt)" = committed; '
             "test ! -e /payload/.env",
         ], check=True)
+
+
+class KafkaFixtureImageTest(unittest.TestCase):
+    def test_validates_index_id_and_selected_platform_separately(self):
+        helper = Path(__file__).with_name("kafka-test-image.sh")
+        with tempfile.TemporaryDirectory() as directory:
+            docker = Path(directory) / "docker"
+            docker.write_bytes(b"""#!/bin/sh
+set -eu
+case "$*" in
+    'image inspect --format {{.Id}} '*) printf '%s\\n' "$FIXTURE_ID" ;;
+    'image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} {{.Config.User}} '*)
+        printf '%s\\n' "$FIXTURE_PLATFORM" ;;
+    *) exit 3 ;;
+esac
+""")
+            docker.chmod(0o700)
+            for image_id, platform, code in (
+                (DIGEST, "linux/amd64 appuser", 0),
+                (PUSHED_DIGEST, "linux/amd64 appuser", 2),
+                (DIGEST, "linux/arm64 appuser", 2),
+                (DIGEST, "linux/amd64 root", 2),
+            ):
+                with self.subTest(image_id=image_id, platform=platform):
+                    result = subprocess.run(
+                        ["sh", str(helper), DIGEST], capture_output=True, text=True,
+                        env={**os.environ, "PATH": directory + os.pathsep + os.environ["PATH"],
+                             "FIXTURE_ID": image_id, "FIXTURE_PLATFORM": platform},
+                    )
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual(result.stdout.strip(), DIGEST if code == 0 else "")
 
 
 class DockerfileTest(unittest.TestCase):

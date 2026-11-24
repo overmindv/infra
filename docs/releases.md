@@ -35,6 +35,14 @@
 Настройте чтение этого приватного пакета для Actions из `overmindv/docs`.
 Проверка кандидата запускает Postgres smoke и Trivy на одном digest.
 
+Опция `--with-kafka` работает так же: возьмите SHA Infra с
+`deploy/kafka/Dockerfile` и `tests/catalog-kafka-live.sh`. Она выбирает
+собранную Kafka 4.3.2 с обновленными пакетами Alpine. Брокер и `kafka-topics`
+берут один опубликованный digest из `images.kafka`. Перед запуском E2E
+на этом образе проходит сценарий Sandbox SCRAM, а Trivy проверяет тот же digest.
+Выдайте Docs чтение и для приватного пакета `rc/kafka`. Флаги можно применять
+отдельно или вместе. Без них оба образа остаются в `upstream`.
+
 Временные файлы можно держать в `.local/`. Команды выполняются из `infra`:
 
 ```sh
