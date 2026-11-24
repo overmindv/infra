@@ -120,6 +120,18 @@ class ReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match the pinned source trees"):
             release.build(self.workspace, plan)
 
+    def test_candidate_labels_link_private_docs_and_keep_source_provenance(self):
+        plan = self.plan(registry=release.CANDIDATE_REGISTRY)
+        plan_id = release.fingerprint(plan)
+        labels = release.labels_for(plan, "users", plan_id)
+        self.assertEqual(labels["org.opencontainers.image.source"], "https://github.com/overmindv/docs")
+        self.assertEqual(labels["io.overmindv.release.source"], "https://github.com/overmindv/users")
+        self.assertEqual(labels["org.opencontainers.image.revision"], self.sources["users"])
+        self.assertEqual(labels["io.overmindv.release.plan"], plan_id)
+        regular = release.labels_for(self.plan(), "users", plan_id)
+        self.assertEqual(regular["org.opencontainers.image.source"], "https://github.com/overmindv/users")
+        self.assertNotIn("io.overmindv.release.source", regular)
+
     def test_builds_declared_renderer_target_from_the_pinned_service_source(self):
         stage_images = {"users-renderer": ("users", "Dockerfile", "renderer")}
         with patch.object(release, "STAGE_IMAGES", stage_images):

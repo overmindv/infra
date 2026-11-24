@@ -18,6 +18,7 @@ from release_sources import (
 
 PLATFORM = "linux/amd64"
 RELEASE_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,47}")
+CANDIDATE_REGISTRY = "ghcr.io/overmindv/rc"
 
 
 def unique_keys(pairs):
@@ -110,12 +111,17 @@ def validate_plan(plan):
 
 def labels_for(plan, service, plan_id):
     name = plan["images"][service]["source"]
-    return {
+    labels = {
         "org.opencontainers.image.source": remote_source(name),
         "org.opencontainers.image.revision": plan["sources"][name],
         "io.overmindv.release.plan": plan_id,
         "io.overmindv.release.service": service,
     }
+    if plan["registry"] == CANDIDATE_REGISTRY:
+        # GHCR uses the OCI source label to inherit access from the linked repo.
+        labels["io.overmindv.release.source"] = labels["org.opencontainers.image.source"]
+        labels["org.opencontainers.image.source"] = remote_source("docs")
+    return labels
 
 
 def inspect(image, labels):
