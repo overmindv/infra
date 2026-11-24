@@ -9,7 +9,13 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-for version in 4.3.1 4.3.2; do
+case "$#:${1:-}" in
+    0:) set -- 4.3.1 4.3.2 ;;
+    1:sha256:*) set -- 4.3.2 "$1" ;;
+    *) printf '%s\n' 'Usage: kafka-release-perf.sh [local candidate image ID]' >&2; exit 2 ;;
+esac
+
+for version; do
     image=$(sh "$root/kafka-test-image.sh" "$version")
     broker=$(docker run -d --rm --pull never --platform linux/amd64 --network none \
         --hostname kafka-bench --add-host kafka-bench:127.0.0.1 \

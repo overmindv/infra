@@ -8,8 +8,21 @@ case "${1:-4.3.2}" in
     4.3.2)
         printf '%s\n' 'apache/kafka:4.3.2@sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7'
         ;;
+    sha256:*)
+        if [ "${#1}" -ne 71 ] || ! printf '%s\n' "$1" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            printf '%s\n' 'Expected a full Kafka fixture image ID' >&2
+            exit 2
+        fi
+        actual=$(docker image inspect --platform linux/amd64 \
+            --format '{{.Id}} {{.Os}}/{{.Architecture}} {{.Config.User}}' "$1")
+        if [ "$actual" != "$1 linux/amd64 appuser" ]; then
+            printf '%s\n' 'Expected a local linux/amd64 Kafka image running as appuser' >&2
+            exit 2
+        fi
+        printf '%s\n' "$1"
+        ;;
     *)
-        printf '%s\n' 'Kafka fixture version must be 4.3.1 or 4.3.2' >&2
+        printf '%s\n' 'Expected Kafka version 4.3.1, 4.3.2 or a local image ID' >&2
         exit 2
         ;;
 esac

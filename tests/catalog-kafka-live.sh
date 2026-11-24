@@ -2,7 +2,8 @@
 set -eu
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-CATALOG_KAFKA_TEST_IMAGE=$(sh "$root/tests/kafka-test-image.sh" "${KAFKA_TEST_VERSION:-4.3.2}")
+CATALOG_KAFKA_TEST_IMAGE=$(sh "$root/tests/kafka-test-image.sh" \
+    "${KAFKA_TEST_IMAGE_ID:-${KAFKA_TEST_VERSION:-4.3.2}}")
 export CATALOG_KAFKA_TEST_IMAGE
 work=$(mktemp -d)
 project="catalogkafka-$(basename "$work" | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]')"
