@@ -123,6 +123,7 @@ class ProductionComposeTest(unittest.TestCase):
             *(f"{name}={index + 800:064x}" for index, name in enumerate(deploy.CATALOG_KAFKA_CREDENTIALS)),
             f"{deploy.FEED_KAFKA_CREDENTIAL}={850:064x}",
             f"{deploy.CONTENT_KAFKA_CREDENTIAL}={852:064x}",
+            f"{deploy.TASKS_KAFKA_CREDENTIAL}={853:064x}",
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
@@ -202,6 +203,18 @@ class ProductionComposeTest(unittest.TestCase):
                 deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, content_tls=cls.content_tls,
                                    catalog_kafka_tls=cls.catalog_tls),
             )
+        cls.tasks_kafka_options = {
+            "content_tls": cls.content_tls, "catalog_kafka_tls": cls.catalog_tls,
+            "feed_kafka": "tls", "sandbox_kafka_dir": cls.sandbox_kafka_dir, "content_kafka": "tls",
+        }
+        env = deploy.compose_env(cls.images["app"], cls.migration, cls.runner_tls, cls.content_tls,
+                                 cls.catalog_tls, cls.sandbox_kafka_dir)
+        cls.tasks_kafka = {
+            mode: deploy.check_compose(
+                deploy.compose_args("app", fixture, tasks_kafka=mode, **cls.tasks_kafka_options), env,
+            )
+            for mode in (None, "tls", "rollback")
+        }
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
@@ -387,6 +400,41 @@ class ProductionComposeTest(unittest.TestCase):
                 model["services"][peer]["environment"][key] = value
                 deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
                                    self.content_tls, self.catalog_tls, feed_kafka="tls", content_kafka="tls")
+
+    def test_tasks_kafka_changes_only_tasks_and_provisioning(self):
+        baseline = self.tasks_kafka[None]["services"]
+        for mode in ("tls", "rollback"):
+            with self.subTest(mode=mode):
+                model = self.tasks_kafka[mode]
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   tasks_kafka=mode, **self.tasks_kafka_options)
+                for name in baseline.keys() - {"tasks", "kafka", "kafka-topics"}:
+                    self.assertEqual(model["services"][name], baseline[name])
+        secure = self.tasks_kafka["tls"]["services"]["tasks"]["environment"]
+        old = baseline["tasks"]["environment"]
+        for key in ("KAFKA_REQUESTS_TOPIC", "KAFKA_RESULTS_TOPIC", "KAFKA_RESULTS_CONSUMER_GROUP", "ENV"):
+            self.assertEqual(secure[key], old[key])
+        self.assertEqual(self.tasks_kafka["rollback"]["services"]["tasks"], baseline["tasks"])
+        self.assertNotIn(deploy.TASKS_KAFKA_CREDENTIAL,
+                         self.tasks_kafka["rollback"]["services"]["kafka"]["environment"])
+
+    def test_tasks_kafka_rejects_drift_and_credential_leaks(self):
+        for peer, key, value in (
+            ("tasks", "ENV", "local"),
+            ("tasks", "KAFKA_TLS_SERVER_NAME", "different-broker"),
+            ("tasks", "KAFKA_REQUESTS_TOPIC", "changed.requests"),
+            ("tasks", "KAFKA_RESULTS_TOPIC", "changed.results"),
+            ("tasks", "KAFKA_RESULTS_CONSUMER_GROUP", "unrelated-group"),
+            ("kafka-topics", "KAFKA_TASK_ACTIVITY_TOPIC", "changed.activity"),
+            ("kafka-topics", "OVM_KAFKA_TASKS_TLS", "rollback"),
+            ("tasks-migrate", "KAFKA_SASL_PASSWORD", f"{853:064x}"),
+            ("sandbox", "UNEXPECTED_URL", f"https://user:{853:064x}@example.invalid"),
+        ):
+            with self.subTest(peer=peer, key=key), self.assertRaisesRegex(ValueError, "Kafka"):
+                model = copy.deepcopy(self.tasks_kafka["tls"])
+                model["services"][peer]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   tasks_kafka="tls", **self.tasks_kafka_options)
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]

@@ -34,6 +34,8 @@ services:
     image: alpine:3
   content:
     image: alpine:3
+  tasks:
+    image: alpine:3
 networks:
   default:
     internal: true

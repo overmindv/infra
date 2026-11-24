@@ -32,6 +32,12 @@ case "$content_mode" in
     true|rollback) legacy || die 'Content TLS requires catalog rollout mode' ;;
     *) die 'invalid Content TLS mode' ;;
 esac
+tasks_mode=${OVM_KAFKA_TASKS_TLS:-false}
+case "$tasks_mode" in
+    false) ;;
+    true|rollback) legacy || die 'Tasks TLS requires catalog rollout mode' ;;
+    *) die 'invalid Tasks TLS mode' ;;
+esac
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -231,6 +237,10 @@ if legacy; then
     legacy_acl "$content_mode" Write --topic "${KAFKA_CONTENT_TOPIC:-content.content-item-events}" \
         --topic "$material_topic" --topic "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" \
         --topic "${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}"
+    legacy_acl "$tasks_mode" Write --topic "${KAFKA_REQUESTS_TOPIC:-code-execution.requests.v1}" \
+        --topic "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}" --topic learning.outcome.v1
+    legacy_acl "$tasks_mode" Read --topic "${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}"
+    legacy_acl "$tasks_mode" Read --group "$tasks_group"
 fi
 
 # Combine grants that have the same principal and operation.
@@ -238,21 +248,23 @@ grants() {
     legacy_reads=0
     if legacy; then legacy_reads=1; fi
     printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" \
-        -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" -v content_mode="$content_mode" '
+        -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" -v content_mode="$content_mode" \
+        -v tasks_mode="$tasks_mode" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
         $1 == material_topic { print "Read", "recommendations", "--topic", $1 }
         legacy && $3 != "-" && $3 != "entities" && $1 != "learning.goal.v1" &&
-            (sandbox_mode != "true" || $3 != "sandbox") && (content_mode != "true" || $3 != "content") {
+            (sandbox_mode != "true" || $3 != "sandbox") && (content_mode != "true" || $3 != "content") &&
+            (tasks_mode != "true" || $3 != "tasks") {
             print "Write", "ANONYMOUS", "--topic", $1
         }
         legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) &&
-            (sandbox_mode != "true" || $4 != "sandbox") {
+            (sandbox_mode != "true" || $4 != "sandbox") && (tasks_mode != "true" || $4 != "tasks") {
             print "Read", "ANONYMOUS", "--topic", $1
         }
         legacy && $5 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed") &&
-            (sandbox_mode != "true" || $4 != "sandbox") {
+            (sandbox_mode != "true" || $4 != "sandbox") && (tasks_mode != "true" || $4 != "tasks") {
             print "Read", "ANONYMOUS", "--group", $5
         }
     ' | sort -u | awk '
