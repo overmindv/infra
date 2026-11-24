@@ -11,6 +11,10 @@ on:
         description: Reviewed full SHA of overmindv/infra containing this workflow
         required: true
         type: string
+      candidate:
+        description: Scan the separate private release candidate packages
+        type: boolean
+        default: false
     secrets:
       ORGANIZATION_READ_TOKEN:
         description: Read-only token for private release source repositories
@@ -29,6 +33,8 @@ jobs:
         env:
           PRIVATE_CALLER: ${{ github.event.repository.private }}
           CALLER_OWNER: ${{ github.repository_owner }}
+          CALLER_REPO: ${{ github.repository }}
+          CANDIDATE: ${{ inputs.candidate }}
           SCAN_REF: ${{ inputs.scan_ref }}
         run: |
           if [[ "$PRIVATE_CALLER" != true || "$CALLER_OWNER" != overmindv ]]; then
@@ -39,6 +45,15 @@ jobs:
             echo "::error::Provide the reviewed infra commit SHA"
             exit 2
           fi
+          registry=ghcr.io/overmindv
+          if [[ "$CANDIDATE" == true ]]; then
+            if [[ "$CALLER_REPO" != overmindv/docs ]]; then
+              echo "::error::Release candidates are restricted to private overmindv/docs"
+              exit 2
+            fi
+            registry=ghcr.io/overmindv/rc
+          fi
+          printf 'RELEASE_REGISTRY=%s\n' "$registry" >> "$GITHUB_ENV"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: overmindv/infra
@@ -71,7 +86,7 @@ jobs:
           printf '%s\n' "$RELEASE_MANIFEST" > "$RUNNER_TEMP/release.json"
           python3 scripts/release_scan.py fetch-sources \
             --manifest "$RUNNER_TEMP/release.json" --workspace "$RUNNER_TEMP/release-sources" \
-            --registry ghcr.io/overmindv
+            --registry "$RELEASE_REGISTRY"
       - name: Sign in to GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -84,7 +99,7 @@ jobs:
           if [[ -f release-caller/$policy ]]; then policy=release-caller/$policy; fi
           python3 scripts/release_scan.py scan --manifest "$RUNNER_TEMP/release.json" \
             --workspace "$RUNNER_TEMP/release-sources" --output "$RUNNER_TEMP/release-security" \
-            --registry ghcr.io/overmindv --exceptions "$policy"
+            --registry "$RELEASE_REGISTRY" --exceptions "$policy"
       - name: Upload report and SBOMs
         if: always() && github.event.repository.private && github.repository_owner == 'overmindv'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
