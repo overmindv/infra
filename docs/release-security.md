@@ -102,6 +102,33 @@ python3 tests/postgres_roles_smoke.py --image "$image" --benchmark
 БД в отдельном контейнере без сети и постоянных томов. Сканы до и после сравнивайте
 на одной версии базы Trivy. Образ не подключен к `release.json` или Compose.
 
+## Проверить системные обновления Kafka
+
+`deploy/kafka/Dockerfile` обновляет пять пакетов Alpine в Kafka 4.3.2. Версия Kafka,
+пользователь `appuser` и команда запуска остаются прежними. Образ только для проверки:
+обычные манифесты и Compose продолжают брать прежний Kafka.
+
+```sh
+mkdir -p .local
+docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
+  --build-arg SOURCE_DATE_EPOCH=1791703284 --tag overmindv/kafka:4.3.2-check \
+  --metadata-file .local/kafka-build.json \
+  --output type=oci,dest=.local/kafka.tar,rewrite-timestamp=true deploy/kafka
+layout=$(mktemp -d .local/kafka-oci.XXXXXX)
+tar -xf .local/kafka.tar -C "$layout"
+trivy image --platform linux/amd64 --scanners vuln,secret --input "$layout"
+docker load --input .local/kafka.tar
+image=$(jq -er '."containerimage.digest"' .local/kafka-build.json)
+KAFKA_TEST_IMAGE_ID="$image" sh tests/catalog-kafka-live.sh
+KAFKA_TEST_IMAGE_ID="$image" sh tests/catalog-kafka-live.sh content
+KAFKA_TEST_IMAGE_ID="$image" sh tests/catalog-kafka-live.sh sandbox
+docker pull "$(sh tests/kafka-test-image.sh 4.3.2)"
+sh tests/kafka-release-perf.sh "$image"
+```
+
+Перед сравнением сканов закрепите одну базу Trivy для исходного и нового образов.
+Замер сравнивает их при одинаковых лимитах. Тесты не используют рабочие данные Kafka.
+
 Форматы инструментов: [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck),
 [npm audit](https://docs.npmjs.com/cli/commands/npm-audit/),
 [Trivy SBOM](https://trivy.dev/docs/latest/supply-chain/sbom/),
