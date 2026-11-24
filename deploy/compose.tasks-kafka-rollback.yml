@@ -1,0 +1,4 @@
+services:
+  kafka-topics:
+    environment:
+      OVM_KAFKA_TASKS_TLS: rollback

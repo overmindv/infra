@@ -1,0 +1,23 @@
+services:
+  kafka:
+    environment:
+      OVM_KAFKA_TASKS_PASSWORD: ${OVM_KAFKA_TASKS_PASSWORD:?set Kafka Tasks password}
+  kafka-topics:
+    environment:
+      OVM_KAFKA_TASKS_TLS: "true"
+  tasks:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9094
+      KAFKA_TLS_ENABLED: "true"
+      KAFKA_TLS_CA_FILE: /run/kafka/ca.pem
+      KAFKA_TLS_SERVER_NAME: kafka
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_SASL_USERNAME: tasks
+      KAFKA_SASL_PASSWORD: ${OVM_KAFKA_TASKS_PASSWORD:?set Kafka Tasks password}
+    volumes:
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/ca.pem
+        target: /run/kafka/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
