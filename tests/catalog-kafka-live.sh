@@ -33,6 +33,12 @@ content_tls() {
 content_rollback() {
     feed_tls -f "$root/deploy/compose.content-kafka-rollback.yml" "$@"
 }
+tasks_tls() {
+    feed_tls -f "$root/deploy/compose.tasks-kafka-tls.yml" "$@"
+}
+tasks_rollback() {
+    feed_tls -f "$root/deploy/compose.tasks-kafka-rollback.yml" "$@"
+}
 fixture_chown() {
     docker run --rm --network none --user 0:0 --entrypoint chown \
         --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
@@ -243,9 +249,67 @@ content_rollout() {
     printf '%s\n' 'Content TLS, consumer offsets and the explicit rollback passed'
 }
 
+tasks_rollout() {
+    requests=code-execution.requests.v1
+    results=code-execution.results.v1
+    activity=task.activity.v1
+    learning=learning.outcome.v1
+    tasks_group=tasks-code-results-v1
+    recommendations_group=recommendations-learning-evidence-v1
+    OVM_KAFKA_TASKS_PASSWORD=$(openssl rand -hex 32)
+    export OVM_KAFKA_TASKS_PASSWORD
+
+    feed_tls up -d kafka
+    wait_kafka
+    feed_tls run --rm -T --no-deps kafka-topics
+    printf '%s\n' 'job|consumed-before-tls' 'job|queued-before-tls' | produce kafka:9092 "$results"
+    [ "$(read_one kafka:9092 "$results" "$tasks_group")" = consumed-before-tls ]
+
+    tasks_tls up -d kafka
+    wait_kafka
+    tasks_tls run --rm -T --no-deps kafka-topics
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties tasks "$OVM_KAFKA_TASKS_PASSWORD" ca.pem tasks.properties
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    [ "$(read_one kafka:9094 "$results" "$tasks_group" --command-config /tmp/tasks.properties \
+        --command-property enable.auto.commit=false)" = queued-before-tls ]
+    [ "$(read_one kafka:9094 "$results" "$tasks_group" --command-config /tmp/tasks.properties)" = queued-before-tls ]
+    printf '%s\n' 'job|request-after-tls' | produce kafka:9094 "$requests" --command-config /tmp/tasks.properties
+    [ "$(read_one kafka:9092 "$requests" sandbox-code-execution-v1)" = request-after-tls ]
+    printf '%s\n' 'job|activity-after-tls' | produce kafka:9094 "$activity" --command-config /tmp/tasks.properties
+    [ "$(read_one kafka:9094 "$activity" feed-v1 --command-config /tmp/feed.properties)" = activity-after-tls ]
+    printf '%s\n' 'job|outcome-after-tls' | produce kafka:9094 "$learning" --command-config /tmp/tasks.properties
+    [ "$(read_one kafka:9092 "$learning" "$recommendations_group")" = outcome-after-tls ]
+
+    for topic in "$requests" "$activity" "$learning"; do
+        printf '%s\n' 'job|legacy-cannot-publish' | expect_denied TopicAuthorizationException \
+            produce kafka:9092 "$topic" --command-property enable.idempotence=false
+    done
+    expect_denied GroupAuthorizationException read_one kafka:9092 "$learning" "$tasks_group"
+    expect_denied TopicAuthorizationException read_one kafka:9092 "$results" "$recommendations_group"
+    printf '%s\n' 'job|tasks-cannot-write-result' | expect_denied TopicAuthorizationException \
+        produce kafka:9094 "$results" --command-config /tmp/tasks.properties --command-property enable.idempotence=false
+    expect_denied GroupAuthorizationException read_one kafka:9094 "$results" "$recommendations_group" \
+        --command-config /tmp/tasks.properties
+    printf '%s\n' 'job|queued-for-rollback' | produce kafka:9092 "$results"
+
+    tasks_rollback up -d kafka
+    wait_kafka
+    tasks_rollback run --rm -T --no-deps kafka-topics
+    [ "$(read_one kafka:9092 "$results" "$tasks_group")" = queued-for-rollback ]
+    printf '%s\n' 'job|request-after-rollback' | produce kafka:9092 "$requests"
+    [ "$(read_one kafka:9092 "$requests" sandbox-code-execution-v1)" = request-after-rollback ]
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties tasks "$OVM_KAFKA_TASKS_PASSWORD" ca.pem tasks.properties
+    printf '%s\n' 'job|revoked-account' | expect_denied SaslAuthenticationException \
+        produce kafka:9094 "$requests" --command-config /tmp/tasks.properties
+    printf '%s\n' 'Tasks TLS, minimum ACLs and consumer offsets survived rollout and rollback'
+}
+
 case "${1:-}" in
     sandbox) sandbox_rollout; exit ;;
     content) content_rollout; exit ;;
+    tasks) tasks_rollout; exit ;;
     '') ;;
     *) exit 2 ;;
 esac
