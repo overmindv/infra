@@ -123,35 +123,68 @@ def exercise(container, passwords, measure):
     logs = log.stdout + log.stderr
     require(all(value not in logs for value in (*passwords.values(), new_password)), "password found in PostgreSQL log")
     print("Runtime password rotated; old login refused, active data preserved, no raw password in logs")
+    return new_password
+
+
+def wait_for_postgres(container):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if docker("exec", container, "pg_isready", "-q", "-h", "127.0.0.1", "-U", "postgres", "-d", DB).returncode == 0:
+            return
+        time.sleep(0.25)
+    raise RuntimeError("temporary PostgreSQL did not start")
+
+
+def check_server_user(container):
+    uid = succeed(docker("exec", container, "id", "-u", "postgres"), "lookup OS postgres user")
+    status = succeed(docker("exec", container, "cat", "/proc/1/status"), "inspect PostgreSQL process")
+    actual = re.search(r"^Uid:\s+([^\n]+)", status, re.MULTILINE)
+    require(uid.isdecimal() and uid != "0" and actual and actual[1].split() == [uid] * 4,
+            "PostgreSQL PID 1 did not drop root")
 
 
 def main():
     parser = argparse.ArgumentParser(description="Test production roles on a temporary PostgreSQL")
     parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument("--image", default="postgres:17-alpine", help="PostgreSQL image or local image ID")
     args = parser.parse_args()
+    if args.image.startswith("-"):
+        parser.error("expected an image reference")
     name = f"ovm163-db-{secrets.token_hex(5)}"
     passwords = {key: secrets.token_hex(32) for key in PASSWORD_KEYS}
+    # Keep PGDATA in the fixture container layer so restart preserves it without a Docker volume.
+    start = time.monotonic()
     started = docker(
-        "run", "--rm", "-d", "--name", name, "--network", "none", "--cpus", "2", "--memory", "384m",
-        "--tmpfs", "/var/lib/postgresql/data:rw,size=192m",
+        "run", "-d", "--name", name, "--platform", "linux/amd64", "--network", "none",
+        "--cpus", "2", "--memory", "384m", "--security-opt", "no-new-privileges:true",
+        "--tmpfs", "/var/lib/postgresql/data:rw,size=1m",
         "--mount", f"type=bind,source={ROOT / 'deploy/postgres/init-roles.sql'},"
                    "target=/docker-entrypoint-initdb.d/20-roles.sql,readonly",
         "-e", f"POSTGRES_DB={DB}", "-e", "POSTGRES_USER=postgres",
+        "-e", "PGDATA=/var/lib/postgresql/ovm-fixture",
         "-e", "POSTGRES_INITDB_ARGS=--auth-local=peer --auth-host=scram-sha-256",
         *(argument for key in passwords for argument in ("-e", key)),
-        "postgres:17-alpine", env={**os.environ, **passwords},
+        args.image, env={**os.environ, **passwords},
     )
-    require(started.returncode == 0, "could not start temporary PostgreSQL")
+    container = succeed(started, "start temporary PostgreSQL")
+    require(re.fullmatch(r"[0-9a-f]{64}", container), "unexpected fixture container ID")
     try:
-        for _ in range(40):
-            if docker("exec", name, "pg_isready", "-q", "-h", "127.0.0.1", "-U", "postgres", "-d", DB).returncode == 0:
-                break
-            time.sleep(0.5)
-        else:
-            raise RuntimeError("temporary PostgreSQL did not start")
-        exercise(name, passwords, args.benchmark)
+        wait_for_postgres(container)
+        print(f"Fresh database ready in {time.monotonic() - start:.3f} s")
+        check_server_user(container)
+        password = exercise(container, passwords, args.benchmark)
+        succeed(docker("restart", "-t", "5", container), "restart temporary PostgreSQL")
+        wait_for_postgres(container)
+        check_server_user(container)
+        actual = succeed(psql(container, APP, password, """
+            SELECT count(*) FROM demo;
+            SELECT (xpath('/root/value/text()', '<root><value>ok</value></root>'::xml))[1]::text;
+        """), "read preserved data and XML after restart")
+        require(actual == "10000\nok", "restart lost fixture data or XML support")
+        print("PostgreSQL runs without root; XML and row checks passed after restart")
     finally:
-        docker("stop", "-t", "2", name)
+        docker("stop", "-t", "5", container)
+        docker("rm", container)
 
 
 if __name__ == "__main__":
