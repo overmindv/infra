@@ -21,6 +21,7 @@ RELEASE_ID = re.compile(r"[a-z0-9][a-z0-9.-]{0,47}")
 CANDIDATE_REGISTRY = "ghcr.io/overmindv/rc"
 KAFKA_PATCH_REF = "apache/kafka:4.3.2"
 KAFKA_PATCH_DIGEST = "sha256:852a0d49fc4e656b022e7f23785411802c9a088c78a7c5e39f33969de9c227a7"
+POSTGRES_DOCKERFILE = ("infra", "deploy/postgres/Dockerfile")
 
 
 def unique_keys(pairs):
@@ -64,18 +65,28 @@ def plan_inputs(sources, pins, registry, release):
         raise ValueError("expected a lowercase release name (1-48 characters)")
 
 
-def pinned_upstream(pins):
+def release_dockerfiles(registry, with_postgres):
+    if not with_postgres:
+        return DOCKERFILES
+    if registry != CANDIDATE_REGISTRY:
+        raise ValueError("the built Postgres image is only allowed in private candidates")
+    return {**DOCKERFILES, "postgres": POSTGRES_DOCKERFILE}
+
+
+def pinned_upstream(pins, *, with_postgres=False):
     refs = UPSTREAM
     if "kafka" in refs and refs["kafka"] not in pins and KAFKA_PATCH_REF in pins:
         if pins[KAFKA_PATCH_REF] != KAFKA_PATCH_DIGEST:
             raise ValueError(f"{KAFKA_PATCH_REF}: expected reviewed Kafka digest")
         refs = {**refs, "kafka": KAFKA_PATCH_REF}
-    return {service: pinned_image(ref, pins) for service, ref in refs.items()}
+    return {service: pinned_image(ref, pins) for service, ref in refs.items()
+            if service != "postgres" or not with_postgres}
 
 
-def make_plan(workspace, sources, pins, registry, release):
+def make_plan(workspace, sources, pins, registry, release, *, with_postgres=False):
     plan_inputs(sources, pins, registry, release)
-    upstream = pinned_upstream(pins)
+    dockerfiles = release_dockerfiles(registry, with_postgres)
+    upstream = pinned_upstream(pins, with_postgres=with_postgres)
     repositories = {name: (workspace / name).resolve() for name in sources}
     records = {}
     for name, repo in sorted(repositories.items()):
@@ -83,7 +94,7 @@ def make_plan(workspace, sources, pins, registry, release):
         records[name] = metadata(repo, sources[name])
 
     images = {}
-    for service, (name, path) in sorted(DOCKERFILES.items()):
+    for service, (name, path) in sorted(dockerfiles.items()):
         spec = git(repositories[name], "show", f"{sources[name]}:{path}").decode()
         pinned, bases = pin_dockerfile(spec, pins)
         images[service] = {"source": name, "dockerfile": path, "bases": bases}
@@ -105,16 +116,18 @@ def validate_plan(plan):
         raise ValueError("unsupported release plan")
     plan_inputs(plan["sources"], plan["pins"], plan["registry"], plan["release"])
     images = plan["images"]
+    with_postgres = "postgres" in images
+    dockerfiles = release_dockerfiles(plan["registry"], with_postgres)
     staged = {service: (repo, path, target) for service, (repo, path, target)
               in STAGE_IMAGES.items() if service in images}
-    if plan["platform"] != PLATFORM or images.keys() != DOCKERFILES.keys() | staged.keys():
+    if plan["platform"] != PLATFORM or images.keys() != dockerfiles.keys() | staged.keys():
         raise ValueError("unexpected platform or image set in release plan")
-    expected = {service: (repo, path, None) for service, (repo, path) in DOCKERFILES.items()}
+    expected = {service: (repo, path, None) for service, (repo, path) in dockerfiles.items()}
     for service, (name, path, target) in (expected | staged).items():
         image = images[service]
         if (image["source"], image["dockerfile"], image.get("target")) != (name, path, target):
             raise ValueError(f"{service}: unexpected image source")
-    if plan["upstream"] != pinned_upstream(plan["pins"]):
+    if plan["upstream"] != pinned_upstream(plan["pins"], with_postgres=with_postgres):
         raise ValueError("upstream images do not match the pins")
 
 
@@ -150,11 +163,11 @@ def inspect(image, labels):
 def build(workspace, plan):
     validate_plan(plan)
     if plan != make_plan(workspace, plan["sources"], plan["pins"],
-                         plan["registry"], plan["release"]):
+                         plan["registry"], plan["release"], with_postgres="postgres" in plan["images"]):
         raise ValueError("plan does not match the pinned source trees")
     plan_id = fingerprint(plan)
     built = {}
-    for name in sorted(REPOS - {"infra"}):
+    for name in sorted({image["source"] for image in plan["images"].values()}):
         with tempfile.TemporaryDirectory(prefix="overmindv-release-") as payload:
             context = Path(payload)
             archive(workspace / name, plan["sources"][name], context)
@@ -227,6 +240,8 @@ def main():
             command.add_argument("--pins", type=Path, required=True)
             command.add_argument("--registry", required=True)
             command.add_argument("--release", required=True)
+            command.add_argument("--with-postgres", action="store_true",
+                                 help="build Postgres from the pinned Infra commit for a private candidate")
         elif name == "build":
             command.add_argument("--plan", type=Path, required=True)
         else:
@@ -237,7 +252,8 @@ def main():
             raise ValueError("output must be a new file in an existing directory")
         if args.command == "plan":
             result = make_plan(args.workspace.resolve(), read_json(args.sources),
-                               read_json(args.pins), args.registry, args.release)
+                               read_json(args.pins), args.registry, args.release,
+                               with_postgres=args.with_postgres)
         elif args.command == "build":
             result = build(args.workspace.resolve(), read_json(args.plan))
         else:

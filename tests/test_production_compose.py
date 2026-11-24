@@ -111,6 +111,7 @@ class ProductionComposeTest(unittest.TestCase):
         cls.migration.write_bytes(sql)
         cls.release = fixture_release(sql)
         fixture = root / "app.env"
+        cls.app_env = fixture
         passwords = [
             f"{name.upper().replace('-', '_')}_POSTGRES_{role}={index * 3 + offset + 1:032x}"
             for index, name in enumerate(deploy.DATABASES)
@@ -204,6 +205,28 @@ class ProductionComposeTest(unittest.TestCase):
 
     def check_app(self, model):
         deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls)
+
+    def test_private_postgres_is_shared_by_databases_and_psql_jobs(self):
+        manifest = copy.deepcopy(self.release)
+        plan = manifest["plan"]
+        plan["registry"] = deploy.CANDIDATE_REGISTRY
+        ref = f"{deploy.CANDIDATE_REGISTRY}/postgres@sha256:" + "b" * 64
+        manifest["images"]["postgres"] = ref
+        with self.assertRaisesRegex(ValueError, "single private candidate"):
+            deploy.image_env(manifest, "app")
+        old = plan["upstream"].pop("postgres")
+        images = deploy.image_env(manifest, "app")
+        env = deploy.compose_env(images, self.migration, self.runner_tls)
+        model = deploy.check_compose(deploy.compose_args("app", self.app_env), env)
+        names = {f"{name}-{role}" for name in deploy.DATABASES for role in ("postgres", "grants")}
+        names.update({"sandbox-migrate", "users-no-demo"})
+        for name in names:
+            with self.subTest(service=name):
+                self.assertEqual(model["services"][name]["image"], ref)
+                self.assertEqual(self.model["app"]["services"][name]["image"], old)
+        plan["registry"] = "ghcr.io/overmindv"
+        with self.assertRaisesRegex(ValueError, "single private candidate"):
+            deploy.image_env(manifest, "app")
 
     def test_app_and_runner_are_separate(self):
         deploy.check_migration(self.release, self.migration)

@@ -11,6 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import release_manifest as release
+from release_scan_policy import release_images
 from release_sources import archive, git, pin_dockerfile
 
 
@@ -66,10 +67,10 @@ class ReleaseTest(unittest.TestCase):
         (self.repo / "source.txt").write_bytes(b"dirty\n")
         (self.repo / ".env").write_bytes(b"FIXTURE_ONLY=untracked\n")
 
-    def plan(self, pins=None, registry="example.invalid/overmindv"):
+    def plan(self, pins=None, registry="example.invalid/overmindv", *, with_postgres=False):
         return release.make_plan(self.workspace, self.sources,
                                  {BASE: DIGEST} if pins is None else pins,
-                                 registry, "v1")
+                                 registry, "v1", with_postgres=with_postgres)
 
     def test_reads_only_committed_sources(self):
         plan = self.plan()
@@ -139,6 +140,56 @@ class ReleaseTest(unittest.TestCase):
         plan["metadata"]["users"]["migrations"].clear()
         with self.assertRaisesRegex(ValueError, "does not match the pinned source trees"):
             release.build(self.workspace, plan)
+
+    def test_builds_optional_postgres_from_infra_only_for_a_private_candidate(self):
+        postgres, path = release.POSTGRES_DOCKERFILE
+        repo = self.workspace / postgres
+        recipe = repo / path
+        recipe.parent.mkdir(parents=True)
+        recipe.write_bytes(f"FROM postgres@{DIGEST}\n".encode())
+        git(repo, "add", path)
+        git(repo, "commit", "-qm", "Postgres fixture")
+        sha = git(repo, "rev-parse", "HEAD").decode().strip()
+        git(repo, "update-ref", "refs/remotes/origin/main", sha)
+        self.sources[postgres] = sha
+        recipe.write_bytes(b"FROM scratch\n")
+        upstream = "postgres:17-alpine"
+        registry = release.CANDIDATE_REGISTRY
+        with patch.object(release, "UPSTREAM", {"postgres": upstream}):
+            legacy = self.plan({BASE: DIGEST, upstream: PUSHED_DIGEST}, registry)
+            release.validate_plan(legacy)
+            self.assertEqual(legacy["upstream"], {"postgres": f"postgres@{PUSHED_DIGEST}"})
+            self.assertNotIn("postgres", legacy["images"])
+            with self.assertRaisesRegex(ValueError, "private candidates"):
+                self.plan(with_postgres=True)
+            plan = self.plan(registry=registry, with_postgres=True)
+            self.assertEqual(plan["upstream"], {})
+            self.assertEqual(plan["images"]["postgres"], {
+                "source": "infra", "dockerfile": path, "bases": {f"postgres@{DIGEST}": f"postgres@{DIGEST}"},
+            })
+            calls = []
+            run = subprocess.run
+
+            def check_build(command, **opts):
+                if command[0] != "docker":
+                    return run(command, **opts)
+                dockerfile = Path(command[command.index("--file") + 1])
+                if "io.overmindv.release.service=postgres" in command:
+                    self.assertEqual(dockerfile.read_bytes(), f"FROM postgres@{DIGEST}\n".encode())
+                    self.assertIn(f"org.opencontainers.image.revision={sha}", command)
+                    calls.append(dockerfile)
+                return subprocess.CompletedProcess(command, 0)
+
+            with (patch("subprocess.run", side_effect=check_build),
+                  patch.object(release, "inspect", return_value=DIGEST)):
+                self.assertEqual(release.build(self.workspace, plan)["local_images"],
+                                 {"postgres": DIGEST, "users": DIGEST})
+            self.assertEqual(len(calls), 1)
+            refs = {name: f"{registry}/{name}@{PUSHED_DIGEST}" for name in plan["images"]}
+            self.assertEqual(release_images({"plan": plan, "images": refs}), refs)
+            plan["upstream"] = legacy["upstream"]
+            with self.assertRaisesRegex(ValueError, "upstream images do not match"):
+                release.validate_plan(plan)
 
     def test_candidate_labels_link_private_docs_and_keep_source_provenance(self):
         plan = self.plan(registry=release.CANDIDATE_REGISTRY)

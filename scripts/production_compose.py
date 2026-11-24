@@ -10,6 +10,8 @@ import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from release_manifest import CANDIDATE_REGISTRY
+
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE_REF = re.compile(r"[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}")
@@ -140,7 +142,16 @@ def image_env(manifest, target):
         for name in ((*APPS, "media-renderer") if target == "app" else ("gojudge",))
     }
     if target == "app":
-        refs.update({name: plan["upstream"][name] for name in ("kafka", "postgres", "minio", "clamav")})
+        upstream, published = plan["upstream"], manifest["images"]
+        refs.update({name: upstream[name] for name in ("kafka", "minio", "clamav")})
+        if "postgres" in published:
+            ref = published["postgres"]
+            if (plan.get("registry") != CANDIDATE_REGISTRY or "postgres" in upstream
+                    or not isinstance(ref, str) or not ref.startswith(f"{CANDIDATE_REGISTRY}/postgres@")):
+                raise ValueError("expected a single private candidate Postgres image")
+            refs["postgres"] = ref
+        else:
+            refs["postgres"] = upstream["postgres"]
     for name, ref in refs.items():
         if not isinstance(ref, str) or not IMAGE_REF.fullmatch(ref):
             raise ValueError(f"{name}: expected an image pinned by manifest digest")
