@@ -98,6 +98,7 @@ CATALOG_KAFKA_CREDENTIALS = {
 FEED_KAFKA_CREDENTIAL = "OVM_KAFKA_FEED_PASSWORD"
 CONTENT_KAFKA_CREDENTIAL = "OVM_KAFKA_CONTENT_PASSWORD"
 TASKS_KAFKA_CREDENTIAL = "OVM_KAFKA_TASKS_PASSWORD"
+RECOMMENDATIONS_KAFKA_CREDENTIAL = "OVM_KAFKA_RECOMMENDATIONS_PASSWORD"
 SANDBOX_KAFKA_PATH = f"{CATALOG_KAFKA_PATH}/worker"
 SANDBOX_KAFKA_FILES = ("username", "password")
 SANDBOX_KAFKA_SECURITY = {
@@ -558,7 +559,8 @@ def verified_kafka_client(environment, username):
     }.items())
 
 
-def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, content_kafka=None, tasks_kafka=None):
+def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, content_kafka=None, tasks_kafka=None,
+                        recommendations_kafka=None):
     envs = {name: service.get("environment", {}) for name, service in services.items()}
     broker = envs["kafka"]
     entities = envs["entities"]
@@ -570,15 +572,18 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, conten
         credentials[CONTENT_KAFKA_CREDENTIAL] = (("content", "KAFKA_SASL_PASSWORD"),)
     if tasks_kafka == "tls":
         credentials[TASKS_KAFKA_CREDENTIAL] = (("tasks", "KAFKA_SASL_PASSWORD"),)
+    if recommendations_kafka == "tls":
+        credentials[RECOMMENDATIONS_KAFKA_CREDENTIAL] = (("recommendations", "KAFKA_SASL_PASSWORD"),)
     expected_keys = {(name, var) for key, peers in credentials.items() for name, var in (("kafka", key), *peers)}
     actual_keys = {
         (name, key) for name, env in envs.items() for key in env
         if (key in CATALOG_KAFKA_CREDENTIALS
-            or key in {FEED_KAFKA_CREDENTIAL, CONTENT_KAFKA_CREDENTIAL, TASKS_KAFKA_CREDENTIAL}
-            or (name in {"entities", "feed", "content", "tasks"} and key == "KAFKA_SASL_PASSWORD"))
+            or key in {FEED_KAFKA_CREDENTIAL, CONTENT_KAFKA_CREDENTIAL, TASKS_KAFKA_CREDENTIAL,
+                       RECOMMENDATIONS_KAFKA_CREDENTIAL}
+            or (name in {"entities", "feed", "content", "tasks", "recommendations"} and key == "KAFKA_SASL_PASSWORD"))
     }
     flags = {"OVM_KAFKA_FEED_TLS": feed_kafka, "OVM_KAFKA_CONTENT_TLS": content_kafka,
-             "OVM_KAFKA_TASKS_TLS": tasks_kafka}
+             "OVM_KAFKA_TASKS_TLS": tasks_kafka, "OVM_KAFKA_RECOMMENDATIONS_TLS": recommendations_kafka}
     mode_value = {"tls": "true", "rollback": "rollback"}
     expected_flags = {("kafka-topics", key, mode_value[mode]) for key, mode in flags.items() if mode}
     rollout_flags = {(name, key, env[key]) for name, env in envs.items() for key in flags if key in env}
@@ -649,6 +654,17 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, conten
     elif tasks_kafka == "rollback" and (tasks.get("KAFKA_BOOTSTRAP_SERVERS") != "kafka:9092"
                                        or tasks.get("ENV") != "production"):
         raise ValueError("Tasks Kafka rollback requires a compatible image on the legacy listener")
+    recommendations = envs["recommendations"]
+    if recommendations_kafka == "tls":
+        plan = envs["kafka-topics"]
+        topic_keys = ("KAFKA_CONTENT_MATERIAL_TOPIC", "KAFKA_CONTENT_LEARNING_TOPIC")
+        if (not verified_kafka_client(recommendations, "recommendations")
+                or "KAFKA_TLS_CERT_FILE" in recommendations or "KAFKA_TLS_KEY_FILE" in recommendations
+                or any(not recommendations.get(key) or recommendations[key] != plan.get(key) for key in topic_keys)
+                or not must_wait_for(services["recommendations"], "kafka-topics")):
+            raise ValueError("Recommendations needs verified Kafka TLS and subscription topics from the Kafka plan")
+    elif recommendations_kafka == "rollback" and recommendations.get("KAFKA_BOOTSTRAP_SERVERS") != "kafka:9092":
+        raise ValueError("Recommendations Kafka rollback requires the legacy listener")
     for key, peers in credentials.items():
         value = broker[key]
         if not isinstance(value, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", value) or value in used_secrets:
@@ -656,7 +672,7 @@ def check_catalog_kafka(services, enabled, used_secrets, feed_kafka=None, conten
         recipients = {(name, var) for name, env in envs.items() for var, secret in env.items() if secret == value}
         if recipients != {("kafka", key), *peers}:
             raise ValueError("Kafka catalog credential is missing or shared with an unexpected service")
-        if key in {CONTENT_KAFKA_CREDENTIAL, TASKS_KAFKA_CREDENTIAL} and any(
+        if key in {CONTENT_KAFKA_CREDENTIAL, TASKS_KAFKA_CREDENTIAL, RECOMMENDATIONS_KAFKA_CREDENTIAL} and any(
             value in other for env in envs.values() for other in env.values()
             if isinstance(other, str) and other != value
         ):
@@ -700,7 +716,7 @@ def check_sandbox_kafka(services, directory, rollback, used_secrets):
 
 def check_model(model, target, images, migration=None, runner_tls=None, content_tls=None, catalog_kafka_tls=None,
                 feed_kafka=None, sandbox_kafka_dir=None, sandbox_kafka_rollback=False, content_kafka=None,
-                tasks_kafka=None):
+                tasks_kafka=None, recommendations_kafka=None):
     if feed_kafka is not None and catalog_kafka_tls is None:
         raise ValueError("Feed Kafka TLS requires the catalog Kafka TLS overlay")
     if (sandbox_kafka_dir is not None or sandbox_kafka_rollback) and catalog_kafka_tls is None:
@@ -709,6 +725,8 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
         raise ValueError("Content Kafka requires the catalog Kafka TLS overlay")
     if tasks_kafka is not None and catalog_kafka_tls is None:
         raise ValueError("Tasks Kafka requires the catalog Kafka TLS overlay")
+    if recommendations_kafka is not None and catalog_kafka_tls is None:
+        raise ValueError("Recommendations Kafka requires the catalog Kafka TLS overlay")
     project = PROJECTS[target]
     services = model["services"]
     expected = APP_IMAGES if target == "app" else RUNNER_IMAGES
@@ -750,6 +768,8 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
             allowed_mounts.setdefault("content", set()).add(ca)
         if tasks_kafka == "tls":
             allowed_mounts["tasks"] = {ca}
+        if recommendations_kafka == "tls":
+            allowed_mounts["recommendations"] = {ca}
         if sandbox_kafka_dir is not None:
             allowed_mounts["sandbox"].add(ca)
             allowed_mounts["sandbox"].update((sandbox_kafka_dir / name, f"{SANDBOX_KAFKA_PATH}/{name}")
@@ -834,12 +854,14 @@ def check_model(model, target, images, migration=None, runner_tls=None, content_
     check_catalog_logo_connection(services, used_secrets)
     check_content_connection(services, content_tls is not None, used_secrets)
     check_material_activity(services)
-    check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets, feed_kafka, content_kafka, tasks_kafka)
+    check_catalog_kafka(services, catalog_kafka_tls is not None, used_secrets, feed_kafka, content_kafka, tasks_kafka,
+                        recommendations_kafka)
     check_sandbox_kafka(services, sandbox_kafka_dir, sandbox_kafka_rollback, used_secrets)
 
 
 def compose_args(target, env_file, content_tls=None, catalog_kafka_tls=None, feed_kafka=None,
-                 sandbox_kafka_dir=None, sandbox_kafka_rollback=False, content_kafka=None, tasks_kafka=None):
+                 sandbox_kafka_dir=None, sandbox_kafka_rollback=False, content_kafka=None, tasks_kafka=None,
+                 recommendations_kafka=None):
     args = ["docker", "compose", "--project-directory", str(ROOT)]
     if target == "app":
         args.extend(("--env-file", str(env_file), "-f", "docker-compose.yml", "-f", "deploy/compose.production.yml"))
@@ -859,6 +881,8 @@ def compose_args(target, env_file, content_tls=None, catalog_kafka_tls=None, fee
             args.extend(("-f", f"deploy/compose.content-kafka-{content_kafka}.yml"))
         if tasks_kafka:
             args.extend(("-f", f"deploy/compose.tasks-kafka-{tasks_kafka}.yml"))
+        if recommendations_kafka:
+            args.extend(("-f", f"deploy/compose.recommendations-kafka-{recommendations_kafka}.yml"))
     else:
         args.extend(("-f", "deploy/compose.runner.yml"))
     return args
@@ -935,6 +959,11 @@ def main():
     tasks_mode = parser.add_mutually_exclusive_group()
     tasks_mode.add_argument("--tasks-kafka-tls", dest="tasks_kafka", action="store_const", const="tls")
     tasks_mode.add_argument("--tasks-kafka-rollback", dest="tasks_kafka", action="store_const", const="rollback")
+    recommendations_mode = parser.add_mutually_exclusive_group()
+    recommendations_mode.add_argument("--recommendations-kafka-tls", dest="recommendations_kafka",
+                                      action="store_const", const="tls")
+    recommendations_mode.add_argument("--recommendations-kafka-rollback", dest="recommendations_kafka",
+                                      action="store_const", const="rollback")
     args = parser.parse_args()
     app_files = (args.env_file, args.sandbox_migration, args.runner_tls_dir)
     if args.target == "app" and not all(app_files):
@@ -947,6 +976,8 @@ def main():
         parser.error("Content Kafka flags require app and --catalog-kafka-tls-dir")
     if args.tasks_kafka and (args.target != "app" or args.catalog_kafka_tls_dir is None):
         parser.error("Tasks Kafka flags require app and --catalog-kafka-tls-dir")
+    if args.recommendations_kafka and (args.target != "app" or args.catalog_kafka_tls_dir is None):
+        parser.error("Recommendations Kafka flags require app and --catalog-kafka-tls-dir")
     if ((args.sandbox_kafka_credentials_dir is not None or args.sandbox_kafka_rollback)
             and (args.target != "app" or args.catalog_kafka_tls_dir is None)):
         parser.error("Sandbox Kafka flags require app and --catalog-kafka-tls-dir")
@@ -985,10 +1016,11 @@ def main():
                 check_sandbox_kafka_files(sandbox_kafka_dir, production=args.action == "up")
         environment = compose_env(images, migration, runner_tls, content_tls, catalog_kafka_tls, sandbox_kafka_dir)
         compose = compose_args(args.target, env_file, content_tls, catalog_kafka_tls, args.feed_kafka,
-                               sandbox_kafka_dir, args.sandbox_kafka_rollback, args.content_kafka, args.tasks_kafka)
+                               sandbox_kafka_dir, args.sandbox_kafka_rollback, args.content_kafka, args.tasks_kafka,
+                               args.recommendations_kafka)
         check_model(check_compose(compose, environment), args.target, images, migration, runner_tls, content_tls,
                     catalog_kafka_tls, args.feed_kafka, sandbox_kafka_dir, args.sandbox_kafka_rollback,
-                    args.content_kafka, args.tasks_kafka)
+                    args.content_kafka, args.tasks_kafka, args.recommendations_kafka)
         if args.action == "up":
             check_host(args.target, environment)
             subprocess.run([*compose, "up", "-d", "--no-build"], check=True, cwd=ROOT, env=environment)

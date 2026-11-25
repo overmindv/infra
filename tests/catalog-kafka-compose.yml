@@ -24,6 +24,8 @@ services:
     image: ${CATALOG_KAFKA_TEST_IMAGE:?fixture image required}
     entrypoint: ["/bin/sh", "/opt/overmind/kafka/topics.sh"]
     command: ["local", "kafka:9092"]
+    environment:
+      KAFKA_TOPIC_PARTITIONS: ${CATALOG_KAFKA_TEST_PARTITIONS:-3}
     volumes:
       - ./scripts/kafka:/opt/overmind/kafka:ro
   entities:
@@ -35,6 +37,8 @@ services:
   content:
     image: alpine:3
   tasks:
+    image: alpine:3
+  recommendations:
     image: alpine:3
 networks:
   default:

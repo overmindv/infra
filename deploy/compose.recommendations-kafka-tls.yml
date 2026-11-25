@@ -1,0 +1,26 @@
+services:
+  kafka:
+    environment:
+      OVM_KAFKA_RECOMMENDATIONS_PASSWORD: ${OVM_KAFKA_RECOMMENDATIONS_PASSWORD:?set Kafka Recommendations password}
+  kafka-topics:
+    environment:
+      OVM_KAFKA_RECOMMENDATIONS_TLS: "true"
+  recommendations:
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9094
+      KAFKA_TLS_ENABLED: "true"
+      KAFKA_TLS_CA_FILE: /run/kafka/ca.pem
+      KAFKA_TLS_SERVER_NAME: kafka
+      KAFKA_SASL_MECHANISM: PLAIN
+      KAFKA_SASL_USERNAME: recommendations
+      KAFKA_SASL_PASSWORD: ${OVM_KAFKA_RECOMMENDATIONS_PASSWORD:?set Kafka Recommendations password}
+    volumes:
+      - type: bind
+        source: ${RELEASE_CATALOG_KAFKA_TLS_DIR:?Kafka TLS directory required}/ca.pem
+        target: /run/kafka/ca.pem
+        read_only: true
+        bind:
+          create_host_path: false
+    depends_on:
+      kafka-topics:
+        condition: service_completed_successfully

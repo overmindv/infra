@@ -39,6 +39,12 @@ tasks_tls() {
 tasks_rollback() {
     feed_tls -f "$root/deploy/compose.tasks-kafka-rollback.yml" "$@"
 }
+recommendations_tls() {
+    feed_tls -f "$root/deploy/compose.recommendations-kafka-tls.yml" "$@"
+}
+recommendations_rollback() {
+    feed_tls -f "$root/deploy/compose.recommendations-kafka-rollback.yml" "$@"
+}
 fixture_chown() {
     docker run --rm --network none --user 0:0 --entrypoint chown \
         --mount "type=bind,src=$work,dst=/fixture" "$CATALOG_KAFKA_TEST_IMAGE" "$@"
@@ -115,6 +121,13 @@ read_one() {
     shift 3
     base exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" \
         --topic "$topic" --group "$group" --from-beginning --max-messages 1 --timeout-ms 8000 "$@"
+}
+read_partition() {
+    bootstrap=$1
+    topic=$2
+    shift 2
+    base exec -T kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server "$bootstrap" \
+        --topic "$topic" --partition 0 --offset earliest --max-messages 1 --timeout-ms 8000 "$@"
 }
 expect_denied() {
     error=$1
@@ -306,10 +319,73 @@ tasks_rollout() {
     printf '%s\n' 'Tasks TLS, minimum ACLs and consumer offsets survived rollout and rollback'
 }
 
+recommendations_rollout() {
+    learning=content.learning.v1
+    outcomes=learning.outcome.v1
+    material=content.material.v1
+    goals=learning.goal.v1
+    evidence_group=recommendations-learning-evidence-v1
+    OVM_KAFKA_RECOMMENDATIONS_PASSWORD=$(openssl rand -hex 32)
+    export OVM_KAFKA_RECOMMENDATIONS_PASSWORD
+    export CATALOG_KAFKA_TEST_PARTITIONS=1
+
+    secure up -d kafka
+    wait_kafka
+    secure run --rm -T --no-deps kafka-topics
+    printf '%s\n' 'student|first-outcome' 'student|queued-outcome' | produce kafka:9092 "$outcomes"
+    printf '%s\n' 'material|published' | produce kafka:9092 "$material"
+    [ "$(read_one kafka:9092 "$outcomes" "$evidence_group")" = first-outcome ]
+
+    recommendations_tls up -d kafka
+    wait_kafka
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties recommendations "$OVM_KAFKA_RECOMMENDATIONS_PASSWORD" ca.pem recommendations.properties
+    properties feed "$OVM_KAFKA_FEED_PASSWORD" ca.pem feed.properties
+    properties catalog_admin "$OVM_KAFKA_CATALOG_ADMIN_PASSWORD" ca.pem admin.properties
+    secure -f "$root/deploy/compose.recommendations-kafka-tls.yml" run --rm -T --no-deps kafka-topics
+    [ "$(read_partition kafka:9092 "$material")" = published ]
+    [ "$(read_one kafka:9092 "$material" feed-v1)" = published ]
+    recommendations_tls run --rm -T --no-deps kafka-topics
+
+    [ "$(read_one kafka:9094 "$outcomes" "$evidence_group" --command-config /tmp/recommendations.properties \
+        --command-property enable.auto.commit=false)" = queued-outcome ]
+    [ "$(read_one kafka:9094 "$outcomes" "$evidence_group" --command-config /tmp/recommendations.properties)" = queued-outcome ]
+    printf '%s\n' 'student|material-completed' | produce kafka:9092 "$learning"
+    [ "$(read_one kafka:9094 "$learning" "$evidence_group" --command-config /tmp/recommendations.properties)" = material-completed ]
+    [ "$(read_partition kafka:9094 "$material" --command-config /tmp/recommendations.properties)" = published ]
+    printf '%s\n' 'material|queued-for-feed' | produce kafka:9092 "$material"
+    [ "$(read_one kafka:9094 "$material" feed-v1 --command-config /tmp/feed.properties)" = queued-for-feed ]
+    printf '%s\n' 'student|goal-completed' | produce kafka:9094 "$goals" --command-config /tmp/recommendations.properties
+    [ "$(read_partition kafka:9094 "$goals" --command-config /tmp/admin.properties)" = goal-completed ]
+
+    expect_denied TopicAuthorizationException read_partition kafka:9092 "$material"
+    expect_denied TopicAuthorizationException read_partition kafka:9092 "$outcomes"
+    expect_denied GroupAuthorizationException read_one kafka:9092 code-execution.results.v1 "$evidence_group"
+    expect_denied GroupAuthorizationException read_one kafka:9094 "$outcomes" feed-v1 \
+        --command-config /tmp/recommendations.properties
+    printf '%s\n' 'student|foreign-publish' | expect_denied TopicAuthorizationException \
+        produce kafka:9094 code-execution.requests.v1 --command-config /tmp/recommendations.properties \
+        --command-property enable.idempotence=false
+    printf '%s\n' 'student|queued-for-rollback' | produce kafka:9092 "$outcomes"
+
+    recommendations_rollback up -d kafka
+    wait_kafka
+    recommendations_rollback run --rm -T --no-deps kafka-topics
+    [ "$(read_one kafka:9092 "$outcomes" "$evidence_group")" = queued-for-rollback ]
+    [ "$(read_partition kafka:9092 "$material")" = published ]
+    save_client ca.pem < "$work/kafka-ca.pem"
+    properties recommendations "$OVM_KAFKA_RECOMMENDATIONS_PASSWORD" ca.pem recommendations.properties
+    expect_denied SaslAuthenticationException read_partition kafka:9094 "$material" --command-config /tmp/recommendations.properties
+    printf '%s\n' 'student|legacy-cannot-publish-goal' | expect_denied TopicAuthorizationException \
+        produce kafka:9092 "$goals" --command-property enable.idempotence=false
+    printf '%s\n' 'Recommendations TLS, shared material ACLs and offsets survived rollout and rollback'
+}
+
 case "${1:-}" in
     sandbox) sandbox_rollout; exit ;;
     content) content_rollout; exit ;;
     tasks) tasks_rollout; exit ;;
+    recommendations) recommendations_rollout; exit ;;
     '') ;;
     *) exit 2 ;;
 esac

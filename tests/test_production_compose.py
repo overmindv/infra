@@ -124,6 +124,7 @@ class ProductionComposeTest(unittest.TestCase):
             f"{deploy.FEED_KAFKA_CREDENTIAL}={850:064x}",
             f"{deploy.CONTENT_KAFKA_CREDENTIAL}={852:064x}",
             f"{deploy.TASKS_KAFKA_CREDENTIAL}={853:064x}",
+            f"{deploy.RECOMMENDATIONS_KAFKA_CREDENTIAL}={854:064x}",
             "BOOTSTRAP_SUPERUSER_EMAIL=operator@example.org",
             "BOOTSTRAP_SUPERUSER_PASSWORD=unused-fixture",
             "MEDIA_INTERNAL_TOKEN=",
@@ -214,6 +215,13 @@ class ProductionComposeTest(unittest.TestCase):
                 deploy.compose_args("app", fixture, tasks_kafka=mode, **cls.tasks_kafka_options), env,
             )
             for mode in (None, "tls", "rollback")
+        }
+        cls.recommendations_kafka = {
+            mode: deploy.check_compose(
+                deploy.compose_args("app", fixture, tasks_kafka="tls", recommendations_kafka=mode,
+                                    **cls.tasks_kafka_options), env,
+            )
+            for mode in ("tls", "rollback")
         }
 
     def check_app(self, model):
@@ -435,6 +443,39 @@ class ProductionComposeTest(unittest.TestCase):
                 model["services"][peer]["environment"][key] = value
                 deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
                                    tasks_kafka="tls", **self.tasks_kafka_options)
+
+    def test_recommendations_kafka_preserves_existing_clients_and_flags(self):
+        baseline = self.tasks_kafka["tls"]["services"]
+        for mode, model in self.recommendations_kafka.items():
+            with self.subTest(mode=mode):
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   tasks_kafka="tls", recommendations_kafka=mode, **self.tasks_kafka_options)
+                for name in baseline.keys() - {"recommendations", "kafka", "kafka-topics"}:
+                    self.assertEqual(model["services"][name], baseline[name])
+        old = baseline["recommendations"]["environment"]
+        secure = self.recommendations_kafka["tls"]["services"]["recommendations"]["environment"]
+        for key in ("KAFKA_CONTENT_MATERIAL_TOPIC", "KAFKA_CONTENT_LEARNING_TOPIC",
+                    "RECOMMENDATIONS_RESOURCE_PROJECTION_ENABLED", "RECOMMENDATIONS_LEARNING_EVIDENCE_ENABLED"):
+            self.assertEqual(secure[key], old[key])
+        rollback = self.recommendations_kafka["rollback"]["services"]
+        self.assertEqual(rollback["recommendations"], baseline["recommendations"])
+        self.assertNotIn(deploy.RECOMMENDATIONS_KAFKA_CREDENTIAL, rollback["kafka"]["environment"])
+
+    def test_recommendations_kafka_rejects_transport_topic_and_secret_drift(self):
+        for peer, key, value in (
+            ("recommendations", "KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"),
+            ("recommendations", "KAFKA_TLS_SERVER_NAME", "other-broker"),
+            ("recommendations", "KAFKA_CONTENT_MATERIAL_TOPIC", "other.material"),
+            ("recommendations", "KAFKA_CONTENT_LEARNING_TOPIC", "other.learning"),
+            ("kafka-topics", "OVM_KAFKA_RECOMMENDATIONS_TLS", "rollback"),
+            ("recommendations-migrate", "KAFKA_SASL_PASSWORD", f"{854:064x}"),
+            ("sandbox", "UNEXPECTED_URL", f"https://user:{854:064x}@example.invalid"),
+        ):
+            with self.subTest(peer=peer, key=key), self.assertRaisesRegex(ValueError, "Kafka"):
+                model = copy.deepcopy(self.recommendations_kafka["tls"])
+                model["services"][peer]["environment"][key] = value
+                deploy.check_model(model, "app", self.images["app"], self.migration, self.runner_tls,
+                                   tasks_kafka="tls", recommendations_kafka="tls", **self.tasks_kafka_options)
 
     def test_catalog_snapshot_token_is_opt_in_and_scoped(self):
         current = self.model["app"]["services"]
