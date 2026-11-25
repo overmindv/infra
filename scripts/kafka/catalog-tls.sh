@@ -77,9 +77,15 @@ case "${1:-}" in
             check_distinct "$tasks"
             users="$users user_tasks=\"$tasks\""
         fi
+        if [ "${OVM_KAFKA_RECOMMENDATIONS_PASSWORD+x}" ]; then
+            recommendations=$OVM_KAFKA_RECOMMENDATIONS_PASSWORD
+            check_distinct "$recommendations"
+            users="$users user_recommendations=\"$recommendations\""
+        fi
         export KAFKA_LISTENER_NAME_SECURE_PLAIN_SASL_JAAS_CONFIG="$plain $users;"
         unset OVM_KAFKA_CATALOG_BROKER_PASSWORD OVM_KAFKA_CATALOG_ADMIN_PASSWORD OVM_KAFKA_CATALOG_ENTITIES_PASSWORD
         unset OVM_KAFKA_FEED_PASSWORD OVM_KAFKA_CONTENT_PASSWORD OVM_KAFKA_TASKS_PASSWORD
+        unset OVM_KAFKA_RECOMMENDATIONS_PASSWORD
         exec /__cacert_entrypoint.sh /etc/kafka/docker/run
         ;;
     provision)

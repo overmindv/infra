@@ -38,6 +38,12 @@ case "$tasks_mode" in
     true|rollback) legacy || die 'Tasks TLS requires catalog rollout mode' ;;
     *) die 'invalid Tasks TLS mode' ;;
 esac
+recommendations_mode=${OVM_KAFKA_RECOMMENDATIONS_TLS:-false}
+case "$recommendations_mode" in
+    false) ;;
+    true|rollback) legacy || die 'Recommendations TLS requires catalog rollout mode' ;;
+    *) die 'invalid Recommendations TLS mode' ;;
+esac
 
 partitions=${KAFKA_TOPIC_PARTITIONS:-3}
 replicas=${KAFKA_TOPIC_REPLICATION_FACTOR:-1}
@@ -49,6 +55,7 @@ v2=${KAFKA_RESERVE_EXECUTION_V2:-false}
 tasks_group=${KAFKA_RESULTS_CONSUMER_GROUP:-tasks-code-results-v1}
 sandbox_group=${SANDBOX_KAFKA_GROUP_ID:-sandbox-code-execution-v1}
 feed_group=${FEED_CONSUMER_GROUP:-feed-v1}
+recommendations_group=recommendations-learning-evidence-v1
 material_topic=${KAFKA_CONTENT_MATERIAL_TOPIC:-content.material.v1}
 
 number() {
@@ -90,10 +97,10 @@ catalog() {
     row "${KAFKA_CONTENT_TOPIC:-content.content-item-events}" "$legacy_max" content - -
     row "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" "$legacy_max" entities feed "$feed_group"
     row "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}" "$legacy_max" tasks feed "$feed_group"
-    row learning.outcome.v1 "$metadata_max" tasks recommendations recommendations-learning-evidence-v1
+    row learning.outcome.v1 "$metadata_max" tasks recommendations "$recommendations_group"
     row learning.goal.v1 "$metadata_max" recommendations - -
     row "$material_topic" "$metadata_max" content feed "$feed_group"
-    row "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" "$metadata_max" content recommendations recommendations-learning-evidence-v1
+    row "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}" "$metadata_max" content recommendations "$recommendations_group"
     row "${KAFKA_CONTENT_CONTRIBUTION_TOPIC:-content.contribution.v1}" "$metadata_max" content - -
     row user.deleted.v1 "$metadata_max" - - -
     if [ "$v2" = true ]; then
@@ -219,7 +226,6 @@ if legacy; then
     kafka kafka-acls --add --deny-principal User:ANONYMOUS --operation Write \
         --resource-pattern-type literal --topic "${KAFKA_CATALOG_ACTIVITY_TOPIC:-catalog.activity.v1}" \
         --topic learning.goal.v1 >/dev/null
-    # Materials are still shared with the legacy Recommendations consumer.
     feed_mode=false
     case "$mode" in
         catalog-rollout-feed) feed_mode=true ;;
@@ -241,6 +247,16 @@ if legacy; then
         --topic "${KAFKA_TASK_ACTIVITY_TOPIC:-task.activity.v1}" --topic learning.outcome.v1
     legacy_acl "$tasks_mode" Read --topic "${KAFKA_RESULTS_TOPIC:-code-execution.results.v1}"
     legacy_acl "$tasks_mode" Read --group "$tasks_group"
+    legacy_acl "$recommendations_mode" Read --topic learning.outcome.v1 \
+        --topic "${KAFKA_CONTENT_LEARNING_TOPIC:-content.learning.v1}"
+    legacy_acl "$recommendations_mode" Read --group "$recommendations_group"
+
+    # Reject legacy material reads only after both readers switch to TLS.
+    if [ "$feed_mode" = true ] && [ "$recommendations_mode" = true ]; then
+        legacy_acl true Read --topic "$material_topic"
+    elif [ "$feed_mode" = rollback ] || [ "$recommendations_mode" = rollback ]; then
+        legacy_acl rollback Read --topic "$material_topic"
+    fi
 fi
 
 # Combine grants that have the same principal and operation.
@@ -249,7 +265,7 @@ grants() {
     if legacy; then legacy_reads=1; fi
     printf '%s\n' "$rows" | awk -v material_topic="$material_topic" -v mode="$mode" \
         -v legacy="$legacy_reads" -v sandbox_mode="$sandbox_mode" -v content_mode="$content_mode" \
-        -v tasks_mode="$tasks_mode" '
+        -v tasks_mode="$tasks_mode" -v recommendations_mode="$recommendations_mode" '
         $3 != "-" { print "Write", $3, "--topic", $1 }
         $4 != "-" { print "Read", $4, "--topic", $1 }
         $5 != "-" { print "Read", $4, "--group", $5 }
@@ -259,11 +275,14 @@ grants() {
             (tasks_mode != "true" || $3 != "tasks") {
             print "Write", "ANONYMOUS", "--topic", $1
         }
-        legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" || $1 == material_topic) &&
+        legacy && $4 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed" ||
+            ($1 == material_topic && recommendations_mode != "true")) &&
+            (recommendations_mode != "true" || $4 != "recommendations") &&
             (sandbox_mode != "true" || $4 != "sandbox") && (tasks_mode != "true" || $4 != "tasks") {
             print "Read", "ANONYMOUS", "--topic", $1
         }
         legacy && $5 != "-" && (mode != "catalog-rollout-feed" || $4 != "feed") &&
+            (recommendations_mode != "true" || $4 != "recommendations") &&
             (sandbox_mode != "true" || $4 != "sandbox") && (tasks_mode != "true" || $4 != "tasks") {
             print "Read", "ANONYMOUS", "--group", $5
         }
